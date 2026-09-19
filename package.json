@@ -13,7 +13,8 @@
     "verify:align": "node scripts/verify-alignment.mjs",
     "verify:p4": "node scripts/p4-smoke.mjs",
     "verify:p5": "node scripts/p5-smoke.mjs",
-    "verify:p6": "node scripts/p6-smoke.mjs"
+    "verify:p6": "node scripts/p6-smoke.mjs",
+    "verify:all": "node scripts/check-tables.mjs && node scripts/verify-alignment.mjs && node scripts/p4-smoke.mjs && node scripts/p5-smoke.mjs && node scripts/p6-smoke.mjs"
   },
   "author": "JacksenHu",
   "license": "MIT",

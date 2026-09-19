@@ -24,6 +24,7 @@ npm run dev        # 开发模式，热更新
 npm run build      # 打包到 out/
 npm run typecheck  # 类型检查
 npm run dist       # 出安装包（NSIS，产物在 release/）
+npm run verify:all # 全量回归：事实表 + P3 对齐 + P4/P5/P6 冒烟
 ```
 
 ## 防漂移

@@ -43,11 +43,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # electron-builder 默认（或复用旧 draft）可能把 release 留在草稿态，这里强制转正
+      # electron-builder 默认（或复用旧 draft）可能把 release 留在草稿态，这里强制转正并生成发布说明
       - name: Make release public
         shell: bash
         run: |
-          gh release edit "v$(node -p "require('./package.json').version")" --draft=false || true
+          gh release edit "v$(node -p "require('./package.json').version")" --draft=false --generate-notes || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
