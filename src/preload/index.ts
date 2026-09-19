@@ -9,7 +9,8 @@ const api = {
     removeAgent: (key: string) => ipcRenderer.invoke('config:removeAgent', key)
   },
   agents: {
-    status: () => ipcRenderer.invoke('agents:status')
+    status: () => ipcRenderer.invoke('agents:status'),
+    detectPresets: () => ipcRenderer.invoke('agents:detectPresets')
   },
   app: {
     version: () => ipcRenderer.invoke('app:getVersion'),

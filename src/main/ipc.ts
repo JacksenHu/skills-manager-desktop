@@ -1,6 +1,12 @@
 import { app, ipcMain, shell } from 'electron'
 import { loadConfig, saveConfig } from './services/config'
 import { listAgentStatus } from './services/agents'
+import { detectPresetAgents } from './services/detect'
+import {
+  detectSameSourceConflicts,
+  loadSameSourceGroups,
+  type VerifyVerdict
+} from './services/junction-state'
 import type { AppConfig, IpcResult } from '@shared/types'
 
 function ok<T>(data: T): IpcResult<T> {
@@ -52,6 +58,16 @@ export function registerIpc(): void {
   handle('agents:status', () => {
     const config: AppConfig = loadConfig()
     return listAgentStatus(config)
+  })
+
+  handle('agents:detectPresets', () => {
+    const config: AppConfig = loadConfig()
+    const detected = detectPresetAgents(config)
+    // 同源多根冲突：按探测出的全部实际路径算（比 config 视野更全）
+    const conflicts = detectSameSourceConflicts(detected.map((d) => d.path), loadSameSourceGroups())
+    const FAILS: VerifyVerdict[] = ['fail-missing', 'fail-not-link', 'fail-wrong-target']
+    const failCount = detected.filter((d) => FAILS.includes(d.state as VerifyVerdict)).length
+    return { detected, conflicts, failCount }
   })
 
   handle('app:getVersion', () => app.getVersion())

@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "preview": "electron-vite preview",
     "dist": "electron-vite build && electron-builder",
-    "check:tables": "node scripts/check-tables.mjs"
+    "check:tables": "node scripts/check-tables.mjs",
+    "verify:align": "node scripts/verify-alignment.mjs"
   },
   "author": "JacksenHu",
   "license": "MIT",

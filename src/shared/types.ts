@@ -20,7 +20,8 @@ export interface AppConfig {
 /** 技能根的联接状态（与 PowerShell 版 verify.ps1 的状态机一一对应） */
 export type JunctionState =
   | 'active' // Junction 且指向共享库
-  | 'empty' // 空目录（已归并）
+  | 'merged-empty' // 空目录且命中同源组（已归并，verify.ps1 不算失败）
+  | 'empty' // 空目录（未命中同源组，verify.ps1 会报不是联接）
   | 'missing' // 目录不存在
   | 'other-link' // 联接但指向别处
   | 'real-dir' // 真实非空目录（未归并）
@@ -53,6 +54,29 @@ export interface AgentStatus {
   target?: string
   /** 通过该入口可见的 SKILL.md 数量 */
   skillCount: number
+}
+
+/** 24 项预设探测的一个条目（detectPresetAgents 输出） */
+export interface DetectedAgent extends AgentStatus {
+  /** 预设的展示名（一个预设可展开多条，如 Marvis 多用户） */
+  presetLabel: string
+  /** merged-empty 时命中的同源组名 */
+  matchedGroup?: string
+  /** 动态预设（glob 展开） */
+  dynamic?: boolean
+}
+
+/** 同源多根冲突（与 PowerShell 版 duplicate-guard.ps1 语义一致） */
+export interface SameSourceConflict {
+  name: string
+  paths: string[]
+}
+
+/** agents:detectPresets 的返回 */
+export interface DetectPresetsResult {
+  detected: DetectedAgent[]
+  conflicts: SameSourceConflict[]
+  failCount: number
 }
 
 /** 共享库中的一个技能 */

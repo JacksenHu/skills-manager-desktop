@@ -2,7 +2,7 @@
 
 跨 Agent 技能共享库的**桌面管理程序**。用 GUI 管理"一套技能装一次、多个 Agent 共用"这件事。
 
-对应的命令行版本在 [`agent-skills-shared`](https://github.com/JacksenHu/agent-skills-shared)（PowerShell 脚本 + 终端向导）。
+对应的命令行版本在 [`agent-skills-shared`](https://github.com/JacksenHu/agent-skills-shared)（PowerShell 脚本 + 终端向导）。  
 本项目是**独立重写**：不调用那些 .ps1，逻辑在 Node 侧重新实现，两边只通过数据耦合——共享技能库目录本身，以及 `{sharedRoot, agents}` 这份配置。
 
 ## 技术栈
@@ -14,7 +14,7 @@ Electron + React + Vite + TypeScript + Tailwind CSS。UI 与交互参照 [CC Swi
 - Windows（Junction 是 Windows 专属能力，建/拆**不需要管理员权限**）
 - Node / npm
 
-Electron 二进制走国内镜像，已写进 `.npmrc`：`ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`
+Electron 二进制走国内镜像，已写进 `.npmrc`：`ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`  
 （本机访问 github.com 在 Node 侧有 TLS 证书问题，默认源会下载失败。）
 
 ## 常用命令
@@ -30,11 +30,11 @@ npm run dist       # 出安装包（NSIS）
 
 桌面程序在 Node 侧重新实现了逻辑，有三张"事实表"是从 PowerShell 版搬过来的：
 
-| 数据 | 落点 | PowerShell 源 |
-|---|---|---|
-| 24 项 Agent 路径预设 | `src/shared/data/agent-presets.json` | `scripts/setup-wizard.ps1:702-724`（+Marvis 动态） |
-| 9 大分类关键词词典（131 个关键词） | `src/shared/data/category-dict.json` | `setup-wizard.ps1:410-420`、`generate-router-skill.ps1:74-84` |
-| 8 个同源多根组（23 条模式） | `src/shared/data/same-source-groups.json` | `scripts/lib/duplicate-guard.ps1:14-23` |
+| 数据                   | 落点                                        | PowerShell 源                                                 |
+| -------------------- | ----------------------------------------- | ------------------------------------------------------------ |
+| 24 项 Agent 路径预设      | `src/shared/data/agent-presets.json`      | `scripts/setup-wizard.ps1:702-724`（+Marvis 动态）               |
+| 9 大分类关键词词典（131 个关键词） | `src/shared/data/category-dict.json`      | `setup-wizard.ps1:410-420`、`generate-router-skill.ps1:74-84` |
+| 8 个同源多根组（23 条模式）     | `src/shared/data/same-source-groups.json` | `scripts/lib/duplicate-guard.ps1:14-23`                      |
 
 谁先改了一边没跟上另一边，行为就会悄悄分叉。所以：
 
@@ -42,7 +42,7 @@ npm run dist       # 出安装包（NSIS）
 npm run check:tables
 ```
 
-它会**反向解析 PowerShell 源码**再与 JSON 逐项比对，不一致就报错并 exit 1（会指出是哪一项、哪边多/少）。
+它会**反向解析 PowerShell 源码**再与 JSON 逐项比对，不一致就报错并 exit 1（会指出是哪一项、哪边多/少）。  
 PowerShell 源码路径可用 `SKILLS_PS_ROOT` 环境变量覆盖。
 
 ## 安全约定
