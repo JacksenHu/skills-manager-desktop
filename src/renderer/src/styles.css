@@ -1,0 +1,23 @@
+@import 'tailwindcss';
+
+/* Tailwind v4 默认按 prefers-color-scheme 判暗色；
+   本项目由 UI 上的主题按钮手动切换，故显式声明走 .dark 类 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    'Microsoft YaHei',
+    'PingFang SC',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
