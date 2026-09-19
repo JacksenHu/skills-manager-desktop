@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowUpCircle, CheckCircle2, HelpCircle, RefreshCw, Search, ShieldQuestion } from 'lucide-react'
-import type { CheckUpdatesResult, IpcResult, OpResult, RepoUpdateInfo, ToolUpdateInfo } from '@shared/types'
-import { ResultModal } from './Modal'
+import { ArrowUpCircle, CheckCircle2, FileText, HelpCircle, RefreshCw, Search, ShieldQuestion } from 'lucide-react'
+import type { CheckUpdatesResult, IpcResult, OpResult, RepoUpdateInfo, ToolReleaseInfo, ToolUpdateInfo } from '@shared/types'
+import { Modal, ResultModal } from './Modal'
 
 const REPO_STATE_META: Record<
   RepoUpdateInfo['state'],
@@ -38,6 +38,8 @@ export function UpdatesPanel({ refreshTick }: { refreshTick: number }) {
   // 自动更新（electron-updater）状态
   const [dlProgress, setDlProgress] = useState<number | null>(null)
   const [downloadedVersion, setDownloadedVersion] = useState<string | null>(null)
+  const [releases, setReleases] = useState<ToolReleaseInfo[]>([])
+  const [changelogOpen, setChangelogOpen] = useState(false)
 
   useEffect(() => {
     const offProgress = window.api.on('update-progress', (p) => {
@@ -64,9 +66,13 @@ export function UpdatesPanel({ refreshTick }: { refreshTick: number }) {
       const r = (await window.api.updates.checkSkills()) as IpcResult<CheckUpdatesResult>
       if (!r.ok) throw new Error(r.error)
       setResult(r.data)
-      const t = (await window.api.updates.checkTool()) as IpcResult<ToolUpdateInfo>
+      const [t, rel] = await Promise.all([
+        window.api.updates.checkTool() as Promise<IpcResult<ToolUpdateInfo>>,
+        window.api.updates.toolReleases() as Promise<IpcResult<ToolReleaseInfo[]>>
+      ])
       if (!t.ok) throw new Error(t.error)
       setTool(t.data)
+      if (rel.ok) setReleases(rel.data)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -204,9 +210,34 @@ export function UpdatesPanel({ refreshTick }: { refreshTick: number }) {
             </div>
           )}
 
-          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            更新包经 GitHub Releases 分发（electron-updater）；安装包未签名，Windows 可能提示保留。
+          <div className="mt-2 flex items-start gap-2">
+            <div className="min-w-0 flex-1 text-xs text-slate-500 dark:text-slate-400">
+              更新包经 GitHub Releases 分发（electron-updater）；安装包未签名，Windows 可能提示保留。
+            </div>
+            {releases.length > 0 && (
+              <button
+                onClick={() => setChangelogOpen(true)}
+                className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-xs text-sky-500 hover:bg-sky-500/10"
+              >
+                <FileText className="h-3 w-3" />
+                更新日志
+              </button>
+            )}
           </div>
+
+          {/* 目标版本的更新说明 */}
+          {tool.state === 'has-update' && (
+            <div className="mt-3 rounded-lg bg-slate-50 p-3 dark:bg-slate-950">
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+                v{tool.remoteVersion} 更新内容
+              </div>
+              <div className="max-h-40 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                {releases.find(
+                  (r) => r.tagName === `v${tool.remoteVersion}` || r.name === tool.remoteVersion
+                )?.body || '（该版本没有填写更新说明）'}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -284,6 +315,39 @@ export function UpdatesPanel({ refreshTick }: { refreshTick: number }) {
 
       {opResult && (
         <ResultModal title={opResult.title} logs={opResult.logs} onClose={() => setOpResult(null)} />
+      )}
+
+      {/* 更新日志弹窗 */}
+      {changelogOpen && (
+        <Modal title="更新日志" onClose={() => setChangelogOpen(false)} width="max-w-2xl">
+          <div className="max-h-[70vh] space-y-4 overflow-auto pr-1">
+            {releases.map((r, i) => (
+              <div key={r.tagName + i} className="rounded-lg bg-slate-50 p-3 dark:bg-slate-950">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm font-medium">{r.tagName}</span>
+                  <span className="text-xs text-slate-400">{r.date}</span>
+                  {r.url && (
+                    <a
+                      href={r.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-auto text-xs text-sky-500 hover:underline"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        void window.api.app.openPath(r.url)
+                      }}
+                    >
+                      在 GitHub 查看
+                    </a>
+                  )}
+                </div>
+                <div className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                  {r.body || '（无更新说明）'}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Modal>
       )}
     </>
   )

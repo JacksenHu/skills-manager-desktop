@@ -21,10 +21,14 @@ import {
   generateRouter,
   installSkills,
   listSkills,
+  listCustomCategories,
   removeSkill,
+  renameCategory,
+  setSkillCategory,
+  setSkillSource,
   translateIntros
 } from './services/skills'
-import { checkSkillUpdates, checkToolUpdate, updateSkills } from './services/updates'
+import { checkSkillUpdates, checkToolUpdate, fetchToolReleases, updateSkills } from './services/updates'
 import { downloadUpdate, installUpdate } from './services/updater'
 import type { AppConfig, IpcResult } from '@shared/types'
 
@@ -147,6 +151,27 @@ export function registerIpc(): void {
 
   handle('skills:router', () => generateRouter(loadConfig()))
 
+  /** 手动指定技能分类（空串恢复自动分类） */
+  handle('skills:setCategory', (name: string, category: string) => {
+    if (!name?.trim()) throw new Error('技能名不能为空')
+    return setSkillCategory(loadConfig(), name.trim(), category ?? '')
+  })
+
+  /** 自定义分类列表（meta.category 中不在词典内的） */
+  handle('skills:customCategories', () => listCustomCategories(loadConfig()))
+
+  /** 重命名自定义分类 */
+  handle('skills:renameCategory', (from: string, to: string) => {
+    if (!from?.trim() || !to?.trim()) throw new Error('分类名不能为空')
+    return renameCategory(loadConfig(), from.trim(), to.trim())
+  })
+
+  /** 设置技能来源并建立版本基准（解析链接 + 拉取当前 commitSha） */
+  handle('skills:setSource', async (name: string, url: string) => {
+    if (!name?.trim() || !url?.trim()) throw new Error('技能名与来源链接不能为空')
+    return setSkillSource(loadConfig(), name.trim(), url.trim())
+  })
+
   // ---------- P6 更新检测 ----------
 
   handle('updates:checkSkills', () => checkSkillUpdates(loadConfig()))
@@ -158,6 +183,9 @@ export function registerIpc(): void {
   })
 
   handle('updates:checkTool', () => checkToolUpdate(loadConfig(), app.getVersion()))
+
+  /** 工具的历史发布记录（含更新说明 / 更新日志） */
+  handle('updates:toolReleases', () => fetchToolReleases(loadConfig()))
 
   /** 下载更新包（electron-updater，GitHub Releases 通道；进度走 update-progress 事件） */
   handle('updates:downloadUpdate', () => downloadUpdate())

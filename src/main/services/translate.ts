@@ -244,7 +244,19 @@ export async function translateChunk(text: string, email?: string): Promise<stri
   return googleZh(text)
 }
 
-/** 整段简介翻译：已含中文直接返回；分块翻译，单块失败保留原文（PS ConvertTo-DescriptionZh 同口径） */
+/** CJK 字符占比：混合文本判定用（"含中文"不够——英文简介常带中文 Trigger 词表） */
+export function cjkRatio(text: string): number {
+  if (!text || !text.length) return 0
+  return (text.match(/[\u4e00-\u9fff]/g) ?? []).length / text.length
+}
+
+/**
+ * 整段简介翻译：
+ * - 中文占比 >= 40% 视为已是中文，原样返回（如 "…核心方法：用 LLM 做结构化差异比对…"）
+ * - 其余（纯英文 / 英文为主夹少量中文）按句分块：含中文的块保留，纯英文块翻译
+ *   ——解决 "Cross-border and logistics: … Trigger: …, 走私, 跨境" 这类混合简介漏翻
+ * - 单块翻译失败保留原文
+ */
 export async function translateDescription(
   description: string,
   email?: string,
@@ -252,13 +264,19 @@ export async function translateDescription(
 ): Promise<string> {
   if (!description || !description.trim()) return ''
   const desc = description.trim()
-  if (hasCjk(desc)) return desc
+  if (cjkRatio(desc) >= 0.4) return desc
   const chunks = splitForTranslate(desc, maxLen)
   let out = ''
+  let changed = false
   for (const c of chunks) {
+    if (cjkRatio(c) >= 0.25) {
+      out += c
+      continue
+    }
     let zh = await translateChunk(c, email)
-    if (!zh) zh = c
+    if (zh) changed = true
+    else zh = c
     out += zh
   }
-  return out.trim()
+  return changed ? out.trim() : desc
 }

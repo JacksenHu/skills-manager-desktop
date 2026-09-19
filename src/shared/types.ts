@@ -181,6 +181,15 @@ export interface ToolUpdateInfo {
   reason?: string
 }
 
+/** 工具的历史发布记录（GitHub Releases，用于展示更新说明 / 更新日志） */
+export interface ToolReleaseInfo {
+  tagName: string
+  name: string
+  date: string
+  body: string
+  url: string
+}
+
 /** electron-updater 下载进度（update-progress 事件负载） */
 export interface UpdateDownloadProgress {
   percent: number

@@ -13,16 +13,15 @@ import { AgentCard } from './components/AgentCard'
 import { SkillsPanel } from './components/SkillsPanel'
 import { UpdatesPanel } from './components/UpdatesPanel'
 import { SettingsPanel } from './components/SettingsPanel'
-import { CreateConfirm, MergeConfirm, ResultModal, ConfirmDialog } from './components/Modal'
+import { CreateConfirm, MergeConfirm, ResultModal, ConfirmDialog, Modal } from './components/Modal'
 
-type Tab = 'connect' | 'detect' | 'skills' | 'updates' | 'settings'
+type Tab = 'connect' | 'detect' | 'skills' | 'updates'
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'connect', label: '联接' },
   { key: 'detect', label: '探测' },
   { key: 'skills', label: '技能库' },
-  { key: 'updates', label: '更新' },
-  { key: 'settings', label: '设置' }
+  { key: 'updates', label: '更新' }
 ]
 
 /** 待确认操作（二次确认弹窗的数据源） */
@@ -36,8 +35,14 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('connect')
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [agents, setAgents] = useState<AgentStatus[]>([])
+  /** 联接页合并展示：探测发现"已联接但未配置"的入口（共享库联接存在但没写配置） */
+  const [linkedUnconfigured, setLinkedUnconfigured] = useState<AgentStatus[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [editingAgent, setEditingAgent] = useState<{ key: string; path: string } | null>(null)
+  const [editKey, setEditKey] = useState('')
+  const [editPath, setEditPath] = useState('')
 
   // P4 操作流状态
   const [pending, setPending] = useState<Pending>(null)
@@ -71,13 +76,27 @@ export default function App() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const cfg = await window.api.config.get()
+      const [cfg, status, detect] = await Promise.all([
+        window.api.config.get() as Promise<IpcResult<AppConfig>>,
+        window.api.agents.status() as Promise<IpcResult<AgentStatus[]>>,
+        window.api.agents.detectPresets() as Promise<IpcResult<DetectPresetsResult>>
+      ])
       if (!cfg.ok) throw new Error(cfg.error)
       setConfig(cfg.data)
-
-      const status = await window.api.agents.status()
       if (!status.ok) throw new Error(status.error)
       setAgents(status.data)
+
+      // 联接页合并：探测到"已联接（指向共享库）但未写入配置"的入口一并展示
+      if (detect.ok) {
+        const known = new Set(Object.values(cfg.data.agents).map((p) => p.toLowerCase()))
+        setLinkedUnconfigured(
+          detect.data.detected.filter(
+            (d) => d.state === 'active' && !d.configured && !known.has(d.path.toLowerCase())
+          )
+        )
+      } else {
+        setLinkedUnconfigured([])
+      }
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -162,6 +181,34 @@ export default function App() {
     }
   }, [pending, afterOp])
 
+  /** 打开编辑弹窗（改配置键名 / 路径；只动配置表，不动磁盘联接） */
+  const startEditAgent = useCallback((key: string) => {
+    const agent = agents.find((a) => a.key === key)
+    if (!agent) return
+    setEditingAgent({ key, path: agent.path })
+    setEditKey(key)
+    setEditPath(agent.path)
+  }, [agents])
+
+  const confirmEditAgent = useCallback(async () => {
+    if (!editingAgent) return
+    const nk = editKey.trim()
+    const np = editPath.trim()
+    if (!nk || !np) return
+    try {
+      const up = await window.api.config.upsertAgent(nk, np)
+      if (!up.ok) throw new Error(up.error)
+      if (nk !== editingAgent.key) {
+        const rm = await window.api.config.removeAgent(editingAgent.key)
+        if (!rm.ok) throw new Error(rm.error)
+      }
+      setEditingAgent(null)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [editingAgent, editKey, editPath, refresh])
+
   return (
     <div className="flex h-screen flex-col bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       {/* 顶部导航（对照 CC Switch） */}
@@ -211,7 +258,7 @@ export default function App() {
             )}
           </button>
           <button
-            onClick={() => setTab('settings')}
+            onClick={() => setSettingsOpen(true)}
             title="设置"
             className="rounded-lg p-2 text-slate-500 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:bg-slate-800/70"
           >
@@ -240,11 +287,12 @@ export default function App() {
                 {config?.sharedRoot ?? '—'}
               </code>
               <span className="ml-auto text-sm text-slate-500 dark:text-slate-400">
-                已接入 {activeCount} / 共 {agents.length}
+                已接入 {activeCount + linkedUnconfigured.length} / 共 {agents.length + linkedUnconfigured.length}
+                {linkedUnconfigured.length > 0 && '（含未配置）'}
               </span>
             </div>
 
-            {agents.length === 0 ? (
+            {agents.length === 0 && linkedUnconfigured.length === 0 ? (
               <Empty
                 title="还没有配置任何 Agent"
                 hint="去「探测」页点任意 Agent 的「接入」，即可建联接并写入配置。"
@@ -252,7 +300,16 @@ export default function App() {
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {agents.map((a) => (
-                  <AgentCard key={a.key} agent={a} onConnect={startConnect} onRemove={startRemove} />
+                  <AgentCard
+                    key={a.key}
+                    agent={a}
+                    onConnect={startConnect}
+                    onRemove={startRemove}
+                    onEdit={startEditAgent}
+                  />
+                ))}
+                {linkedUnconfigured.map((d) => (
+                  <AgentCard key={`unconf|${d.key}|${d.path}`} agent={d} onConnect={startConnect} />
                 ))}
               </div>
             )}
@@ -266,20 +323,12 @@ export default function App() {
             onConnect={startConnect}
             onRemove={startRemove}
             onMerge={startMerge}
+            onEdit={startEditAgent}
           />
         )}
 
         {tab === 'skills' && <SkillsPanel refreshTick={refreshTick} />}
         {tab === 'updates' && <UpdatesPanel refreshTick={refreshTick} />}
-        {tab === 'settings' && (
-          <SettingsPanel
-            config={config}
-            onConfigChanged={(c) => {
-              setConfig(c)
-              void refresh()
-            }}
-          />
-        )}
       </main>
 
       {/* P4 弹窗层 */}
@@ -321,6 +370,50 @@ export default function App() {
       {result && (
         <ResultModal title={result.title} logs={result.logs} onClose={() => setResult(null)} />
       )}
+
+      {/* 设置弹窗（导航栏不再单设设置页） */}
+      {settingsOpen && (
+        <Modal title="设置" onClose={() => setSettingsOpen(false)} width="max-w-3xl">
+          <div className="max-h-[75vh] overflow-auto pr-1">
+            <SettingsPanel
+              config={config}
+              onConfigChanged={(c) => {
+                setConfig(c)
+                void refresh()
+              }}
+            />
+          </div>
+        </Modal>
+      )}
+
+      {/* 编辑 Agent 配置（标识名 / 路径） */}
+      {editingAgent && (
+        <ConfirmDialog
+          title={`编辑 Agent 配置：${editingAgent.key}`}
+          confirmLabel="保存"
+          busy={false}
+          onConfirm={() => void confirmEditAgent()}
+          onClose={() => setEditingAgent(null)}
+        >
+          <div className="space-y-2">
+            <input
+              value={editKey}
+              onChange={(e) => setEditKey(e.target.value)}
+              placeholder="标识名"
+              className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-sky-400 dark:border-slate-600"
+            />
+            <input
+              value={editPath}
+              onChange={(e) => setEditPath(e.target.value)}
+              placeholder="技能根路径"
+              className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-sky-400 dark:border-slate-600"
+            />
+          </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            只修改配置表，不动磁盘上的联接。改路径后旧路径的联接仍在原处（可在「探测」页处理）；改标识名会移除旧配置项。
+          </div>
+        </ConfirmDialog>
+      )}
     </div>
   )
 }
@@ -331,13 +424,15 @@ function DetectPanel({
   refreshTick,
   onConnect,
   onRemove,
-  onMerge
+  onMerge,
+  onEdit
 }: {
   sharedRoot: string
   refreshTick: number
   onConnect: (key: string, path: string, dynamic?: boolean) => void
   onRemove: (key: string) => void
   onMerge: (groupName: string) => void
+  onEdit: (key: string) => void
 }) {
   const [result, setResult] = useState<DetectPresetsResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -430,6 +525,7 @@ function DetectPanel({
               agent={d}
               onConnect={onConnect}
               onRemove={onRemove}
+              onEdit={onEdit}
             />
           ))}
         </div>

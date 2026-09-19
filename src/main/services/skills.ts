@@ -5,7 +5,7 @@ import extractZip from 'extract-zip'
 import type { AppConfig, OpResult, SkillInfo } from '@shared/types'
 import categoryDictJson from '@shared/data/category-dict.json'
 import { assertRealDir } from './junction-write'
-import { httpGet, httpGetJson, hasCjk, translateDescription } from './translate'
+import { httpGet, httpGetJson, httpGetResponse, cjkRatio, translateDescription } from './translate'
 
 /**
  * P5 技能库：列表 / 分类 / 安装 / 移除 / 翻译简介 / 生成路由。
@@ -105,6 +105,8 @@ export interface SkillMeta {
   commitSha?: string
   installedAt?: string
   translatedAt?: string
+  /** 手动指定的分类（覆盖自动判定；空/缺省 = 自动） */
+  category?: string
   [key: string]: unknown
 }
 
@@ -152,9 +154,11 @@ export function listSkills(config: AppConfig): SkillInfo[] {
     if (!existsSync(join(dir, 'SKILL.md'))) continue
     const { fm, intro, introZh } = readIntros(dir)
     const meta = readMeta(dir)
+    const manualCategory = String(meta.category ?? '').trim()
     out.push({
       name: entry.name,
-      category: classifySkill(entry.name, introZh || intro, fm),
+      // 手动指定的分类优先于自动判定
+      category: manualCategory || classifySkill(entry.name, introZh || intro, fm),
       intro,
       introZh,
       source: meta.source?.toString(),
@@ -436,14 +440,15 @@ export async function translateIntros(
       continue
     }
     const existingZh = String(meta.descriptionZh ?? '')
-    if (!opts.force && (hasCjk(existingZh) || hasCjk(desc))) {
+    // 中文占比 >= 40% 视为已是中文（混合简介如 "英文… Trigger: …, 走私" 占比低，仍会翻译）
+    if (!opts.force && (cjkRatio(existingZh) >= 0.4 || cjkRatio(desc) >= 0.4)) {
       skippedZh++
       logs.push(`[跳过] ${name}：已有中文简介`)
       continue
     }
 
     const zh = await translateDescription(desc, config.net?.translateEmail)
-    if (!hasCjk(zh)) {
+    if (!cjkRatio(zh)) {
       failed++
       consecFail++
       logs.push(`[FAIL] ${name}：接口未返回中文，保持原样`)
@@ -494,7 +499,7 @@ export function buildRouterMarkdown(items: RouterItem[], sharedRoot: string): st
   lines.push('---')
   lines.push('name: skill-router')
   lines.push(
-    'description: 共享技能库的总路由。当用户描述一个任务或情境时，先阅读本文件的分类索引，从共享技能库中选出最匹配的 1~3 个技能并说明理由；用户也可以直接点名某个技能名，此时说明它是什么、适合什么场景。所有条目按 9 大分类组织。'
+    'description: 共享技能库的总路由。当用户提出任何任务、问题或寻求帮助时（无论任务大小、是否明确提到技能），先阅读本文件的分类索引，从共享技能库中选出最匹配的 1~3 个技能并说明理由，然后按该技能自己的 SKILL.md 执行；用户直接点名技能名时，说明它的用途、适用场景与触发方式。所有条目按分类组织，未分类技能同样可用。'
   )
   lines.push('---')
   lines.push('')
@@ -504,9 +509,15 @@ export function buildRouterMarkdown(items: RouterItem[], sharedRoot: string): st
   lines.push('')
   lines.push('## 使用方式')
   lines.push('')
-  lines.push('- 直接描述你想做的事（一句话即可），我会按情境推荐最匹配的 1~3 个技能并说明理由；')
-  lines.push('- 或直接说技能名，我告诉你它是什么、什么时候用、怎么触发；')
+  lines.push('- 用户提出任何任务、问题或寻求帮助时（无论任务大小、是否明确提到技能），先在本文件的分类索引里匹配情境，推荐最合适的 1~3 个技能并说明理由；')
+  lines.push('- 或用户直接说技能名，告知它是什么、什么时候用、怎么触发；')
   lines.push('- 本技能只做**索引与推荐**：确定技能后，按该技能自己的 SKILL.md 使用。')
+  lines.push('')
+  lines.push('## 触发时机（写给 Agent）')
+  lines.push('')
+  lines.push('- 只要是"要动手做一件事 / 回答一个专业问题 / 生成一份内容"的请求，就应先查阅本索引再行动；')
+  lines.push('- 索引里没有匹配项时，按常规方式处理，不必提及本技能；')
+  lines.push('- 简介以中文为准（无中文时看英文原文）。')
   lines.push('')
   lines.push('## 路由步骤')
   lines.push('')
@@ -558,4 +569,105 @@ export async function generateRouter(config: AppConfig): Promise<OpResult> {
       '     每次新增/移除技能后，重新生成本技能刷新索引。'
     ]
   }
+}
+
+// ---------- 分类管理（手动指定 / 自定义分类 / 重命名） ----------
+
+function skillDirOrThrow(config: AppConfig, name: string): string {
+  if (name.includes('/') || name.includes('\\') || name.includes('..')) {
+    throw new Error(`非法技能名: ${name}`)
+  }
+  const dir = join(config.sharedRoot, name)
+  if (!existsSync(dir) || !existsSync(join(dir, 'SKILL.md'))) {
+    throw new Error(`共享库中找不到技能: ${name}`)
+  }
+  return dir
+}
+
+/** 手动指定技能分类（写入 _meta.json.category，覆盖自动判定；传空串清除覆盖） */
+export function setSkillCategory(config: AppConfig, name: string, category: string): OpResult {
+  const dir = skillDirOrThrow(config, name)
+  writeMeta(dir, { category: category.trim() })
+  return {
+    logs: [
+      category.trim()
+        ? `[OK] ${name} 分类已设为「${category.trim()}」`
+        : `[OK] ${name} 已恢复自动分类`
+    ]
+  }
+}
+
+/** 收集自定义分类（meta.category 里不在词典 displayOrder 中的名字） */
+export function listCustomCategories(config: AppConfig): string[] {
+  const builtin = new Set(CATEGORY_ORDER)
+  const found = new Set<string>()
+  if (!existsSync(config.sharedRoot)) return []
+  for (const entry of readdirSync(config.sharedRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue
+    const meta = readMeta(join(config.sharedRoot, entry.name))
+    const c = String(meta.category ?? '').trim()
+    if (c && !builtin.has(c)) found.add(c)
+  }
+  return [...found].sort()
+}
+
+/** 重命名自定义分类：遍历共享库把 meta.category === from 的全部改为 to */
+export function renameCategory(config: AppConfig, from: string, to: string): OpResult {
+  const root = config.sharedRoot
+  if (!existsSync(root)) throw new Error(`共享库不存在: ${root}`)
+  if (!from.trim() || !to.trim()) throw new Error('分类名不能为空')
+  const logs: string[] = []
+  let count = 0
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue
+    const dir = join(root, entry.name)
+    const meta = readMeta(dir)
+    if (String(meta.category ?? '').trim() === from.trim()) {
+      writeMeta(dir, { category: to.trim() })
+      count++
+      logs.push(`  ${entry.name}: ${from} -> ${to}`)
+    }
+  }
+  if (count === 0) throw new Error(`没有技能使用分类「${from}」`)
+  logs.unshift(`[OK] 已重命名 ${count} 个技能的分类`)
+  return { logs }
+}
+
+/**
+ * 设置技能来源并建立版本基准（解决"无版本信息"）：
+ * 解析 GitHub / skills.sh 链接 -> 查默认分支最新 commitSha 写入 _meta.json，
+ * 更新检测立即有基准（状态=最新），之后仓库有新提交才算"有更新"。
+ */
+export async function setSkillSource(config: AppConfig, name: string, url: string): Promise<OpResult> {
+  const dir = skillDirOrThrow(config, name)
+  const { owner, repo } = parseSourceUrl(url)
+  const source = `https://github.com/${owner}/${repo}`
+
+  let branch: string | null = null
+  let commitSha = ''
+  try {
+    const api = await httpGetJson<{ default_branch?: string }>(
+      `https://api.github.com/repos/${owner}/${repo}`,
+      { ...GH_OPTS(config), timeoutMs: 20000 }
+    )
+    branch = api.default_branch ?? null
+  } catch {
+    branch = null
+  }
+  if (branch) {
+    try {
+      const commit = await httpGetJson<{ sha?: string }>(
+        `https://api.github.com/repos/${owner}/${repo}/commits/${branch}`,
+        { ...GH_OPTS(config), timeoutMs: 20000 }
+      )
+      commitSha = commit.sha ?? ''
+    } catch {
+      commitSha = ''
+    }
+  }
+
+  writeMeta(dir, { source, branch: branch ?? undefined, commitSha: commitSha || undefined })
+  const logs = [`[OK] ${name} 来源已设为 ${source}${branch ? `@${branch}` : ''}`]
+  logs.push(commitSha ? `版本基准: ${commitSha.slice(0, 12)}（当前为最新，仓库有新提交时更新页会提示）` : '未能获取版本基准（仓库不可达？），更新页会显示[无基准]，可稍后重试')
+  return { logs }
 }

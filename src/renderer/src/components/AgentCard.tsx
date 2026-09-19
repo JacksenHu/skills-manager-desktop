@@ -1,4 +1,4 @@
-import { FolderOpen, Link2Off, Plug } from 'lucide-react'
+import { FolderOpen, Link2Off, Pencil, Plug } from 'lucide-react'
 import type { AgentStatus, JunctionState } from '@shared/types'
 
 export const STATE_META: Record<JunctionState, { label: string; cls: string }> = {
@@ -16,14 +16,18 @@ export const CAN_CONNECT: JunctionState[] = ['missing', 'empty', 'real-dir', 'me
 export function AgentCard({
   agent,
   onConnect,
-  onRemove
+  onRemove,
+  onEdit
 }: {
   agent: AgentStatus & { presetLabel?: string; configured?: boolean; dynamic?: boolean }
   onConnect?: (key: string, path: string, dynamic?: boolean) => void
   onRemove?: (key: string) => void
+  onEdit?: (key: string) => void
 }) {
   const meta = STATE_META[agent.state]
-  const canConnect = onConnect && CAN_CONNECT.includes(agent.state)
+  // 活跃但未配置的入口（如历史联接）也允许"接入"——预案会识别为 already-active，只写配置
+  const canConnect =
+    onConnect && (CAN_CONNECT.includes(agent.state) || (agent.state === 'active' && agent.configured === false))
   const canRemove = onRemove && agent.state === 'active' && agent.configured
 
   return (
@@ -86,6 +90,16 @@ export function AgentCard({
           )}
           {agent.state === 'other-link' && (
             <span className="text-red-400/80">联接指向别处，请人工处理</span>
+          )}
+          {onEdit && agent.configured && (
+            <button
+              onClick={() => onEdit(agent.key)}
+              title="修改标识名 / 路径（只改配置）"
+              className="flex items-center gap-1 rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              编辑
+            </button>
           )}
           <button
             onClick={() => void window.api.app.openPath(agent.path)}

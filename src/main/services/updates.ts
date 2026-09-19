@@ -6,6 +6,7 @@ import type {
   RepoUpdateInfo,
   RepoUpdateState,
   SkillInfo,
+  ToolReleaseInfo,
   ToolUpdateInfo
 } from '@shared/types'
 import { httpGetJson, httpGetResponse } from './translate'
@@ -189,5 +190,37 @@ export async function checkToolUpdate(config: AppConfig, localVersion: string): 
     state: localVersion === remoteVersion ? 'up-to-date' : 'has-update',
     localVersion,
     remoteVersion
+  }
+}
+
+/** 拉取工具的历史发布记录（GitHub Releases，含更新说明），供「更新」页展示更新日志 */
+export async function fetchToolReleases(config: AppConfig): Promise<ToolReleaseInfo[]> {
+  const headers: Record<string, string> = { 'User-Agent': 'agent-skills-shared' }
+  if (config.net?.token) headers.Authorization = `Bearer ${config.net.token}`
+  try {
+    const resp = await httpGetResponse(
+      `https://api.github.com/repos/${TOOL_REPO}/releases?per_page=10`,
+      { headers, timeoutMs: 20000, insecure: config.net?.allowInsecureTls ?? false }
+    )
+    if (resp.status !== 200) return []
+    const list = JSON.parse(Buffer.from(resp.body).toString('utf8')) as {
+      tag_name?: string
+      name?: string
+      published_at?: string
+      body?: string
+      html_url?: string
+      draft?: boolean
+    }[]
+    return list
+      .filter((r) => !r.draft && r.tag_name)
+      .map((r) => ({
+        tagName: r.tag_name ?? '',
+        name: r.name ?? r.tag_name ?? '',
+        date: (r.published_at ?? '').slice(0, 10),
+        body: (r.body ?? '').trim(),
+        url: r.html_url ?? ''
+      }))
+  } catch {
+    return []
   }
 }

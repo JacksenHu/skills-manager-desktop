@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { FolderOpen, Languages, Plus, RefreshCw, Route, Trash2 } from 'lucide-react'
+import { FolderOpen, Languages, Link2, Plus, RefreshCw, Route, Tag, Tags, Trash2 } from 'lucide-react'
 import type { IpcResult, OpResult, SkillInfo } from '@shared/types'
 import { ConfirmDialog, Modal, ResultModal } from './Modal'
 
@@ -16,7 +16,7 @@ const CATEGORY_ORDER = [
   '未分类'
 ] as const
 
-/** 分类徽章配色（按序取色，视觉上区分 9 大类） */
+/** 分类徽章配色（按序取色，视觉上区分各类；自定义分类按 hash 取色） */
 const CHIP_COLORS = [
   'bg-sky-500/15 text-sky-500',
   'bg-violet-500/15 text-violet-400',
@@ -32,11 +32,16 @@ const CHIP_COLORS = [
 
 function chipCls(category: string): string {
   const idx = CATEGORY_ORDER.indexOf(category as (typeof CATEGORY_ORDER)[number])
-  return CHIP_COLORS[idx >= 0 ? idx : CHIP_COLORS.length - 1]
+  if (idx >= 0) return CHIP_COLORS[idx]
+  // 自定义分类：按名字 hash 稳定取色
+  let h = 0
+  for (const ch of category) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return CHIP_COLORS[h % (CHIP_COLORS.length - 1)]
 }
 
 export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
   const [skills, setSkills] = useState<SkillInfo[]>([])
+  const [customCats, setCustomCats] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<string>('全部')
@@ -46,17 +51,32 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
   const [installUrl, setInstallUrl] = useState('')
   const [installReplace, setInstallReplace] = useState(false)
   const [removeTarget, setRemoveTarget] = useState<SkillInfo | null>(null)
-  const [busy, setBusy] = useState<'install' | 'remove' | 'translate' | 'translate-one' | 'router' | null>(
-    null
-  )
+  const [busy, setBusy] = useState<
+    'install' | 'remove' | 'translate' | 'translate-one' | 'router' | 'category' | 'source' | null
+  >(null)
   const [result, setResult] = useState<{ title: string; logs: string[] } | null>(null)
+
+  // 分类 / 来源弹窗
+  const [categoryTarget, setCategoryTarget] = useState<SkillInfo | null>(null)
+  const [categoryNew, setCategoryNew] = useState('')
+  const [manageOpen, setManageOpen] = useState(false)
+  const [renameFrom, setRenameFrom] = useState<string | null>(null)
+  const [renameTo, setRenameTo] = useState('')
+  const [sourceTarget, setSourceTarget] = useState<SkillInfo | null>(null)
+  const [sourceUrl, setSourceUrl] = useState('')
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [batchUrls, setBatchUrls] = useState<Record<string, string>>({})
 
   const run = useCallback(async () => {
     setLoading(true)
     try {
-      const r = (await window.api.skills.list()) as IpcResult<SkillInfo[]>
+      const [r, cc] = await Promise.all([
+        window.api.skills.list() as Promise<IpcResult<SkillInfo[]>>,
+        window.api.skills.customCategories() as Promise<IpcResult<string[]>>
+      ])
       if (!r.ok) throw new Error(r.error)
       setSkills(r.data)
+      if (cc.ok) setCustomCats(cc.data)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -71,7 +91,7 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
 
   /** 统一执行 + 结果弹窗（成功后自动刷新列表） */
   const execute = useCallback(
-    async (title: string, action: () => Promise<IpcResult<OpResult>>) => {
+    async (title: string, action: () => Promise<IpcResult<OpResult>>, done?: () => void) => {
       try {
         const r = await action()
         if (!r.ok) throw new Error(r.error)
@@ -81,6 +101,7 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
         setError(e instanceof Error ? e.message : String(e))
       } finally {
         setBusy(null)
+        done?.()
       }
     },
     [run]
@@ -92,7 +113,17 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
     return m
   }, [skills])
 
+  // 过滤栏分类：内置序 + 自定义分类 + 未分类
+  const allCats = useMemo(() => {
+    const builtin = new Set(CATEGORY_ORDER as readonly string[])
+    const extra = [...new Set(skills.map((s) => s.category))].filter(
+      (c) => !builtin.has(c) && c !== '未分类'
+    )
+    return [...CATEGORY_ORDER, ...extra.sort()]
+  }, [skills])
+
   const visible = filter === '全部' ? skills : skills.filter((s) => s.category === filter)
+  const noSourceCount = skills.filter((s) => !s.source).length
 
   return (
     <>
@@ -111,7 +142,7 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
             void execute('翻译简介（全库增量）', () => window.api.skills.translate())
           }}
           disabled={busy !== null}
-          title="把英文简介译成中文，写入 _meta.json；已有中文的自动跳过"
+          title="把英文简介译成中文，写入 _meta.json；已是中文的自动跳过（混合中英只翻英文部分）"
           className="flex items-center gap-1.5 rounded-lg bg-sky-500/10 px-3 py-1.5 text-sm text-sky-500 transition hover:bg-sky-500/20 disabled:opacity-50"
         >
           <Languages className={`h-3.5 w-3.5 ${busy === 'translate' ? 'animate-pulse' : ''}`} />
@@ -129,6 +160,19 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
           <Route className={`h-3.5 w-3.5 ${busy === 'router' ? 'animate-pulse' : ''}`} />
           生成路由
         </button>
+        {noSourceCount > 0 && (
+          <button
+            onClick={() => {
+              setBatchUrls({})
+              setBatchOpen(true)
+            }}
+            title={`为 ${noSourceCount} 个没有来源的技能配置 GitHub / skills.sh 链接（建立版本基准，供更新检测）`}
+            className="flex items-center gap-1.5 rounded-lg bg-amber-500/10 px-3 py-1.5 text-sm text-amber-500 transition hover:bg-amber-500/20"
+          >
+            <Link2 className="h-3.5 w-3.5" />
+            补全来源（{noSourceCount}）
+          </button>
+        )}
         <button
           onClick={() => void run()}
           disabled={loading}
@@ -140,7 +184,7 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
 
       {/* 分类过滤 */}
       <div className="mb-4 flex flex-wrap items-center gap-1.5">
-        {['全部', ...CATEGORY_ORDER].map((c) => {
+        {['全部', ...allCats].map((c) => {
           const count = c === '全部' ? skills.length : (counts.get(c) ?? 0)
           if (c !== '全部' && count === 0) return null
           return (
@@ -159,6 +203,13 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
             </button>
           )
         })}
+        <button
+          onClick={() => setManageOpen(true)}
+          title="分类管理：重命名 / 删除自定义分类"
+          className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-200/70 hover:text-slate-600 dark:hover:bg-slate-800"
+        >
+          <Tags className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       {error && (
@@ -192,6 +243,14 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
                 void execute(`翻译简介：${s.name}`, () => window.api.skills.translate(s.name, true))
               }}
               onRemove={() => setRemoveTarget(s)}
+              onCategory={() => {
+                setCategoryTarget(s)
+                setCategoryNew('')
+              }}
+              onSource={() => {
+                setSourceTarget(s)
+                setSourceUrl(s.source ?? '')
+              }}
             />
           ))}
         </div>
@@ -248,6 +307,247 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
         </Modal>
       )}
 
+      {/* 分类选择弹窗 */}
+      {categoryTarget && (
+        <Modal title={`分类：${categoryTarget.name}`} onClose={() => setCategoryTarget(null)}>
+          <div className="space-y-3 text-sm">
+            <div className="grid grid-cols-2 gap-1.5">
+              {[...allCats].map((c) => (
+                <button
+                  key={c}
+                  onClick={() => {
+                    const t = categoryTarget
+                    setCategoryTarget(null)
+                    setBusy('category')
+                    void execute(`分类：${t.name}`, () => window.api.skills.setCategory(t.name, c))
+                  }}
+                  className={
+                    'rounded-lg px-2.5 py-1.5 text-xs transition ' +
+                    (categoryTarget.category === c
+                      ? 'bg-sky-500 font-medium text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700')
+                  }
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                value={categoryNew}
+                onChange={(e) => setCategoryNew(e.target.value)}
+                placeholder="新建自定义分类…"
+                className="flex-1 rounded-lg border border-slate-300 bg-transparent px-3 py-1.5 text-xs outline-none focus:border-sky-400 dark:border-slate-600"
+              />
+              <button
+                onClick={() => {
+                  if (!categoryNew.trim()) return
+                  const t = categoryTarget
+                  const name = categoryNew.trim()
+                  setCategoryTarget(null)
+                  setCategoryNew('')
+                  setBusy('category')
+                  void execute(`分类：${t.name}`, () => window.api.skills.setCategory(t.name, name))
+                }}
+                disabled={!categoryNew.trim()}
+                className="rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-sky-600 disabled:opacity-50"
+              >
+                创建并使用
+              </button>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              手动分类保存在技能的 _meta.json，优先于按关键词的自动分类；选「未分类」不等于清除手动设置，要恢复自动分类请选当前分类后再点下方按钮。
+            </div>
+            <button
+              onClick={() => {
+                const t = categoryTarget
+                setCategoryTarget(null)
+                setBusy('category')
+                void execute(`分类：${t.name}`, () => window.api.skills.setCategory(t.name, ''))
+              }}
+              className="text-xs text-sky-500 underline"
+            >
+              恢复自动分类
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* 分类管理弹窗（重命名 / 删除自定义分类） */}
+      {manageOpen && (
+        <Modal title="分类管理（自定义分类）" onClose={() => setManageOpen(false)}>
+          <div className="space-y-3 text-sm">
+            {customCats.length === 0 ? (
+              <div className="text-slate-500 dark:text-slate-400">
+                还没有自定义分类。在技能卡片的「分类」里输入新名字即可创建。
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {customCats.map((c) =>
+                  renameFrom === c ? (
+                    <div key={c} className="flex items-center gap-2">
+                      <input
+                        value={renameTo}
+                        onChange={(e) => setRenameTo(e.target.value)}
+                        autoFocus
+                        className="flex-1 rounded-lg border border-sky-400 bg-transparent px-3 py-1.5 text-xs outline-none dark:border-sky-600"
+                      />
+                      <button
+                        onClick={() => {
+                          if (!renameTo.trim()) return
+                          setRenameFrom(null)
+                          setManageOpen(false)
+                          setBusy('category')
+                          void execute(`重命名分类：${c}`, () =>
+                            window.api.skills.renameCategory(c, renameTo.trim())
+                          )
+                        }}
+                        disabled={!renameTo.trim()}
+                        className="rounded-lg bg-sky-500 px-2.5 py-1 text-xs text-white hover:bg-sky-600 disabled:opacity-50"
+                      >
+                        保存
+                      </button>
+                      <button
+                        onClick={() => setRenameFrom(null)}
+                        className="rounded-lg px-2.5 py-1 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      key={c}
+                      className="group flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-950"
+                    >
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] ${chipCls(c)}`}>{c}</span>
+                      <span className="text-xs text-slate-400">{counts.get(c) ?? 0} 个技能</span>
+                      <div className="ml-auto flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                        <button
+                          onClick={() => {
+                            setRenameFrom(c)
+                            setRenameTo(c)
+                          }}
+                          className="rounded px-2 py-0.5 text-xs text-sky-500 hover:bg-sky-500/10"
+                        >
+                          重命名
+                        </button>
+                      </div>
+                    </div>
+                  )
+                )}
+              </div>
+            )}
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              内置 9 大分类来自关键词词典（防漂移表），不支持改名；删除自定义分类请先把其中技能改到别的分类（重命名到「未分类」除外，重命名即批量迁移）。
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* 来源设置弹窗（单技能） */}
+      {sourceTarget && (
+        <Modal title={`来源 / 版本基准：${sourceTarget.name}`} onClose={() => setSourceTarget(null)}>
+          <div className="space-y-3 text-sm">
+            <div className="text-slate-600 dark:text-slate-300">
+              配置开源仓库链接后，更新页即可检测新版本。保存时会自动获取仓库当前最新提交作为版本基准。
+            </div>
+            <input
+              value={sourceUrl}
+              onChange={(e) => setSourceUrl(e.target.value)}
+              placeholder="https://github.com/owner/repo"
+              className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-sky-400 dark:border-slate-600"
+            />
+            {sourceTarget.source && (
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                当前来源：{sourceTarget.source}
+                {sourceTarget.commitSha ? `（基准 ${sourceTarget.commitSha.slice(0, 12)}）` : '（无基准）'}
+              </div>
+            )}
+          </div>
+          <div className="mt-5 flex justify-end gap-2">
+            <button
+              onClick={() => setSourceTarget(null)}
+              className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+            >
+              取消
+            </button>
+            <button
+              onClick={() => {
+                if (!sourceUrl.trim()) return
+                const t = sourceTarget
+                setSourceTarget(null)
+                setBusy('source')
+                void execute(`来源：${t.name}`, () => window.api.skills.setSource(t.name, sourceUrl.trim()))
+              }}
+              disabled={!sourceUrl.trim()}
+              className="rounded-lg bg-sky-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-600 disabled:opacity-50"
+            >
+              保存并索引版本
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* 批量补全来源弹窗 */}
+      {batchOpen && (
+        <Modal title={`批量补全来源（${skills.filter((s) => !s.source).length} 个技能）`} onClose={() => setBatchOpen(false)} width="max-w-2xl">
+          <div className="space-y-3 text-sm">
+            <div className="text-slate-600 dark:text-slate-300">
+              为没有来源信息的技能逐个填仓库链接（可留空跳过）。保存时自动获取当前提交作为版本基准。
+            </div>
+            <div className="max-h-80 space-y-2 overflow-auto pr-1">
+              {skills
+                .filter((s) => !s.source)
+                .map((s) => (
+                  <div key={s.name} className="flex items-center gap-2">
+                    <span className="w-40 shrink-0 truncate font-mono text-xs">{s.name}</span>
+                    <input
+                      value={batchUrls[s.name] ?? ''}
+                      onChange={(e) => setBatchUrls((m) => ({ ...m, [s.name]: e.target.value }))}
+                      placeholder="https://github.com/owner/repo（留空跳过）"
+                      className="flex-1 rounded-lg border border-slate-300 bg-transparent px-2.5 py-1.5 font-mono text-xs outline-none focus:border-sky-400 dark:border-slate-600"
+                    />
+                  </div>
+                ))}
+            </div>
+          </div>
+          <div className="mt-5 flex justify-end gap-2">
+            <button
+              onClick={() => setBatchOpen(false)}
+              className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+            >
+              取消
+            </button>
+            <button
+              onClick={() => {
+                const filled = Object.entries(batchUrls).filter(([, u]) => u.trim())
+                if (filled.length === 0) return
+                setBatchOpen(false)
+                setBusy('source')
+                void execute(`补全来源（${filled.length} 个）`, async () => {
+                  const logs: string[] = []
+                  let okCount = 0
+                  for (const [name, url] of filled) {
+                    const r = await window.api.skills.setSource(name, url.trim())
+                    if (r.ok) {
+                      logs.push(...r.data.logs)
+                      okCount++
+                    } else {
+                      logs.push(`[FAIL] ${name}: ${r.error}`)
+                    }
+                  }
+                  return { ok: true as const, data: { logs } }
+                })
+              }}
+              disabled={Object.values(batchUrls).every((u) => !u.trim())}
+              className="rounded-lg bg-sky-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-600 disabled:opacity-50"
+            >
+              批量保存
+            </button>
+          </div>
+        </Modal>
+      )}
+
       {/* 移除确认 */}
       {removeTarget && (
         <ConfirmDialog
@@ -283,12 +583,16 @@ function SkillCard({
   skill,
   busy,
   onTranslate,
-  onRemove
+  onRemove,
+  onCategory,
+  onSource
 }: {
   skill: SkillInfo
   busy: boolean
   onTranslate: () => void
   onRemove: () => void
+  onCategory: () => void
+  onSource: () => void
 }) {
   const intro = skill.introZh || skill.intro
   return (
@@ -307,12 +611,16 @@ function SkillCard({
       </div>
 
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-400 dark:text-slate-500">
-        {skill.source && (
-          <span className="max-w-full truncate">
+        {skill.source ? (
+          <span className="max-w-full truncate" title={skill.source}>
             来源 {skill.source.replace('https://github.com/', '')}
             {skill.branch ? `@${skill.branch}` : ''}
           </span>
+        ) : (
+          <span className="text-amber-500/80">无来源（点「来源」补全后可检测更新）</span>
         )}
+        {skill.version && <span>v{skill.version}</span>}
+        {!skill.version && skill.commitSha && <span>基准 {skill.commitSha.slice(0, 7)}</span>}
         {skill.installedAt && <span>装于 {skill.installedAt.slice(0, 10)}</span>}
         {skill.introZh && skill.translatedAt && <span>译于 {skill.translatedAt.slice(0, 10)}</span>}
       </div>
@@ -330,6 +638,22 @@ function SkillCard({
               翻译
             </button>
           )}
+          <button
+            onClick={onSource}
+            title="设置开源仓库链接（建立版本基准，供更新检测）"
+            className="flex items-center gap-1 rounded px-2 py-1 hover:bg-sky-500/10 hover:text-sky-500"
+          >
+            <Link2 className="h-3.5 w-3.5" />
+            来源
+          </button>
+          <button
+            onClick={onCategory}
+            title="设置分类（手动分类优先于自动）"
+            className="flex items-center gap-1 rounded px-2 py-1 hover:bg-sky-500/10 hover:text-sky-500"
+          >
+            <Tag className="h-3.5 w-3.5" />
+            分类
+          </button>
           <button
             onClick={() => void window.api.app.openPath(skill.name)}
             title="打开技能目录（在共享库中）"

@@ -26,12 +26,19 @@ const api = {
     remove: (name: string) => ipcRenderer.invoke('skills:remove', name),
     translate: (name?: string, force?: boolean) =>
       ipcRenderer.invoke('skills:translate', name, force),
-    generateRouter: () => ipcRenderer.invoke('skills:router')
+    generateRouter: () => ipcRenderer.invoke('skills:router'),
+    setCategory: (name: string, category: string) =>
+      ipcRenderer.invoke('skills:setCategory', name, category),
+    customCategories: () => ipcRenderer.invoke('skills:customCategories'),
+    renameCategory: (from: string, to: string) =>
+      ipcRenderer.invoke('skills:renameCategory', from, to),
+    setSource: (name: string, url: string) => ipcRenderer.invoke('skills:setSource', name, url)
   },
   updates: {
     checkSkills: () => ipcRenderer.invoke('updates:checkSkills'),
     updateSkills: (repos: string[]) => ipcRenderer.invoke('updates:updateSkills', repos),
     checkTool: () => ipcRenderer.invoke('updates:checkTool'),
+    toolReleases: () => ipcRenderer.invoke('updates:toolReleases'),
     downloadUpdate: () => ipcRenderer.invoke('updates:downloadUpdate'),
     installUpdate: () => ipcRenderer.invoke('updates:installUpdate')
   },
