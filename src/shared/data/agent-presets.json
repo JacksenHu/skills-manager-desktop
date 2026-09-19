@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "source": "agent-skills-shared/scripts/setup-wizard.ps1:702-724（静态 23 项）+ 726-734（Marvis 动态）",
+  "note": "路径里的 %USERPROFILE% / %LOCALAPPDATA% / %APPDATA% 由运行时展开；dynamic 项按 glob 展开出多个入口",
+  "presets": [
+    {
+      "key": "doubao-user-skills",
+      "label": "Doubao（豆包）用户技能",
+      "path": "%LOCALAPPDATA%\\Doubao\\User Data\\Default\\.doubao\\agent_mode\\workspace\\.user_skills"
+    },
+    {
+      "key": "doubao-extra",
+      "label": "Doubao（豆包）其他技能根",
+      "path": "%USERPROFILE%\\Doubao\\skills"
+    },
+    { "key": "claude-code", "label": "Claude Code", "path": "%USERPROFILE%\\.claude\\skills" },
+    {
+      "key": "codex-agents-skills",
+      "label": "Codex / Cursor / Zed / Copilot（.agents 通用）",
+      "path": "%USERPROFILE%\\.agents\\skills"
+    },
+    { "key": "codex-legacy", "label": "Codex 旧版", "path": "%USERPROFILE%\\.codex\\skills" },
+    { "key": "cursor", "label": "Cursor（独立目录）", "path": "%USERPROFILE%\\.cursor\\skills" },
+    { "key": "windsurf", "label": "Windsurf", "path": "%USERPROFILE%\\.codeium\\windsurf\\skills" },
+    { "key": "openclaw", "label": "OpenClaw", "path": "%USERPROFILE%\\.openclaw\\workspace\\skills" },
+    { "key": "trae", "label": "Trae（国际版）", "path": "%USERPROFILE%\\.trae\\skills" },
+    { "key": "trae-cn", "label": "Trae CN（国内版）", "path": "%USERPROFILE%\\.trae-cn\\skills" },
+    { "key": "copilot", "label": "GitHub Copilot", "path": "%USERPROFILE%\\.copilot\\skills" },
+    {
+      "key": "workbuddy",
+      "label": "WorkBuddy（国内版）",
+      "path": "%USERPROFILE%\\.workbuddy\\skills",
+      "probePath": "%USERPROFILE%\\.workbuddy"
+    },
+    {
+      "key": "codebuddy",
+      "label": "CodeBuddy Code / WorkBuddy AI（国际版）",
+      "path": "%USERPROFILE%\\.codebuddy\\skills",
+      "probePath": "%USERPROFILE%\\.codebuddy"
+    },
+    { "key": "gemini-cli", "label": "Gemini CLI", "path": "%USERPROFILE%\\.gemini\\skills" },
+    { "key": "opencode", "label": "OpenCode", "path": "%USERPROFILE%\\.config\\opencode\\skills" },
+    { "key": "qoder", "label": "Qoder", "path": "%USERPROFILE%\\.qoder\\skills" },
+    { "key": "qoder-cn", "label": "Qoder CN（通义灵码）", "path": "%USERPROFILE%\\.qoder-cn\\skills" },
+    { "key": "kiro", "label": "Kiro（AWS）", "path": "%USERPROFILE%\\.kiro\\skills" },
+    { "key": "cline", "label": "Cline", "path": "%USERPROFILE%\\.cline\\skills" },
+    { "key": "roo-code", "label": "Roo Code", "path": "%USERPROFILE%\\.roo\\skills" },
+    { "key": "augment", "label": "Augment", "path": "%USERPROFILE%\\.augment\\skills" },
+    { "key": "crush", "label": "Crush", "path": "%USERPROFILE%\\.config\\crush\\skills" },
+    { "key": "pi", "label": "Pi", "path": "%USERPROFILE%\\.pi\\agent\\skills" },
+    {
+      "key": "marvis",
+      "label": "Marvis（腾讯）",
+      "path": "%APPDATA%\\Tencent\\Marvis\\User\\<用户ID>\\skills\\custom",
+      "dynamic": true,
+      "glob": "%APPDATA%\\Tencent\\Marvis\\User\\*\\skills\\custom"
+    }
+  ]
+}

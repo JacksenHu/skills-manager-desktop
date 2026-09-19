@@ -1,0 +1,199 @@
+{
+  "version": 1,
+  "source": "agent-skills-shared/scripts/setup-wizard.ps1:410-420（generate-router-skill.ps1:74-84 为同一份副本）",
+  "matchRule": {
+    "cjk": "中文关键词用子串包含匹配（text.includes(keyword)）",
+    "latin": "英文关键词用词边界正则（\\bkeyword\\b）"
+  },
+  "uncategorized": "未分类",
+  "displayOrder": [
+    "开发与工程",
+    "写作与内容",
+    "研究与搜索",
+    "办公与效率",
+    "数据分析",
+    "设计与创意",
+    "音视频与媒体",
+    "Agent 与技能管理",
+    "生活与日常",
+    "未分类"
+  ],
+  "categories": [
+    {
+      "name": "开发与工程",
+      "keywords": [
+        "test",
+        "debug",
+        "coding",
+        "code",
+        "review",
+        "git",
+        "commit",
+        "refactor",
+        "typescript",
+        "python",
+        "react",
+        "frontend",
+        "backend",
+        "programming",
+        "lint",
+        "开发",
+        "测试",
+        "调试",
+        "代码",
+        "审查",
+        "编程",
+        "工程",
+        "重构",
+        "构建"
+      ]
+    },
+    {
+      "name": "写作与内容",
+      "keywords": [
+        "write",
+        "writing",
+        "article",
+        "blog",
+        "copywriting",
+        "content",
+        "essay",
+        "translate",
+        "写作",
+        "文章",
+        "文案",
+        "内容",
+        "公众号",
+        "小红书",
+        "新媒体",
+        "博客",
+        "润色",
+        "翻译"
+      ]
+    },
+    {
+      "name": "研究与搜索",
+      "keywords": [
+        "research",
+        "search",
+        "investigate",
+        "literature",
+        "paper",
+        "学术",
+        "研究",
+        "调研",
+        "搜索",
+        "论文",
+        "文献",
+        "查证"
+      ]
+    },
+    {
+      "name": "办公与效率",
+      "keywords": [
+        "productivity",
+        "meeting",
+        "summary",
+        "summariz",
+        "document",
+        "excel",
+        "sheet",
+        "ppt",
+        "presentation",
+        "calendar",
+        "task",
+        "todo",
+        "email",
+        "会议",
+        "纪要",
+        "文档",
+        "效率",
+        "办公",
+        "任务",
+        "日程",
+        "邮件",
+        "表格"
+      ]
+    },
+    {
+      "name": "数据分析",
+      "keywords": [
+        "data",
+        "analysis",
+        "analytic",
+        "statistic",
+        "dashboard",
+        "数据",
+        "分析",
+        "统计",
+        "图表",
+        "可视化",
+        "报表"
+      ]
+    },
+    {
+      "name": "设计与创意",
+      "keywords": [
+        "design",
+        "image",
+        "poster",
+        "banner",
+        "logo",
+        "illustration",
+        "设计",
+        "图片",
+        "海报",
+        "插画",
+        "视觉",
+        "封面",
+        "创意"
+      ]
+    },
+    {
+      "name": "音视频与媒体",
+      "keywords": [
+        "video",
+        "audio",
+        "media",
+        "podcast",
+        "视频",
+        "音频",
+        "剪辑",
+        "字幕",
+        "配音",
+        "媒体"
+      ]
+    },
+    {
+      "name": "Agent 与技能管理",
+      "keywords": [
+        "agent",
+        "skill",
+        "mcp",
+        "prompt",
+        "claude",
+        "智能体",
+        "技能",
+        "安装",
+        "模型"
+      ]
+    },
+    {
+      "name": "生活与日常",
+      "keywords": [
+        "life",
+        "health",
+        "travel",
+        "food",
+        "fitness",
+        "生活",
+        "健康",
+        "旅行",
+        "美食",
+        "健身",
+        "养生",
+        "菜谱"
+      ]
+    }
+  ]
+}

@@ -29,12 +29,14 @@ export type JunctionState =
 export interface AgentPreset {
   key: string
   label: string
-  /** 技能根路径（可能含 %USERPROFILE% 等占位，运行时展开） */
+  /** 技能根路径；`%USERPROFILE%` / `%LOCALAPPDATA%` / `%APPDATA%` 等占位在运行时展开 */
   path: string
   /** 探测路径：部分软件父目录存在即视为已安装（如 CodeBuddy / WorkBuddy） */
   probePath?: string
-  /** 是否动态生成（Marvis 用户 ID 非固定） */
+  /** 是否动态生成（Marvis 用户 ID 非固定，需按 glob 展开出多个入口） */
   dynamic?: boolean
+  /** dynamic 为 true 时的通配路径，`*` 代表可变片段（如用户 ID） */
+  glob?: string
 }
 
 /** 一个 Agent 的实时状态 */

@@ -26,6 +26,25 @@ npm run typecheck  # 类型检查
 npm run dist       # 出安装包（NSIS）
 ```
 
+## 防漂移
+
+桌面程序在 Node 侧重新实现了逻辑，有三张"事实表"是从 PowerShell 版搬过来的：
+
+| 数据 | 落点 | PowerShell 源 |
+|---|---|---|
+| 24 项 Agent 路径预设 | `src/shared/data/agent-presets.json` | `scripts/setup-wizard.ps1:702-724`（+Marvis 动态） |
+| 9 大分类关键词词典（131 个关键词） | `src/shared/data/category-dict.json` | `setup-wizard.ps1:410-420`、`generate-router-skill.ps1:74-84` |
+| 8 个同源多根组（23 条模式） | `src/shared/data/same-source-groups.json` | `scripts/lib/duplicate-guard.ps1:14-23` |
+
+谁先改了一边没跟上另一边，行为就会悄悄分叉。所以：
+
+```bash
+npm run check:tables
+```
+
+它会**反向解析 PowerShell 源码**再与 JSON 逐项比对，不一致就报错并 exit 1（会指出是哪一项、哪边多/少）。
+PowerShell 源码路径可用 `SKILLS_PS_ROOT` 环境变量覆盖。
+
 ## 安全约定
 
 - 拆除联接一律用 `fs.rmdirSync(path)`——只删重解析点，**不穿透共享库**；代码里禁止 `fs.rmSync(recursive)`
@@ -36,7 +55,7 @@ npm run dist       # 出安装包（NSIS）
 ## 进度
 
 - [x] P1 脚手架：窗口 + IPC + 配置读写 + 联接状态（只读）
-- [ ] P2 三张事实表（24 项 Agent 预设 / 9 大分类词典 / 8 个同源组）落 JSON + 防漂移校验
+- [x] P2 三张事实表（24 项 Agent 预设 / 9 大分类词典 / 8 个同源组）落 JSON + 防漂移校验
 - [ ] P3 联接只读：24 项探测 + 状态机完整对齐
 - [ ] P4 联接写：建 / 拆 / 归并
 - [ ] P5 技能库：列表 / 分类 / 安装 / 移除 / 翻译简介 / 生成路由

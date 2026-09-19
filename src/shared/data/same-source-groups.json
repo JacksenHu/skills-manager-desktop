@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "source": "agent-skills-shared/scripts/lib/duplicate-guard.ps1:14-23",
+  "note": "组内命中 >= 2 个路径即为同源多根，会被同一软件重复加载；patterns 用小写通配匹配（* 任意字符，\\ 为分隔符字面量）",
+  "groups": [
+    {
+      "name": "Doubao（豆包）",
+      "patterns": [
+        "*\\.doubao\\agent_mode\\workspace\\.user_skills",
+        "*\\doubao\\skills",
+        "*\\.agents\\skills"
+      ]
+    },
+    {
+      "name": "Codex / Cursor / Zed / GitHub Copilot",
+      "patterns": [
+        "*\\.agents\\skills",
+        "*\\.codex\\skills",
+        "*\\.cursor\\skills",
+        "*\\.copilot\\skills",
+        "*\\.zed\\skills"
+      ]
+    },
+    {
+      "name": "Trae / Trae CN",
+      "patterns": ["*\\.agents\\skills", "*\\.trae\\skills", "*\\.trae-cn\\skills"]
+    },
+    {
+      "name": "Gemini CLI",
+      "patterns": ["*\\.agents\\skills", "*\\.gemini\\skills"]
+    },
+    {
+      "name": "OpenCode",
+      "patterns": [
+        "*\\.agents\\skills",
+        "*\\.claude\\skills",
+        "*\\.config\\opencode\\skills"
+      ]
+    },
+    {
+      "name": "Roo Code",
+      "patterns": ["*\\.agents\\skills", "*\\.roo\\skills"]
+    },
+    {
+      "name": "Augment",
+      "patterns": ["*\\.agents\\skills", "*\\.claude\\skills", "*\\.augment\\skills"]
+    },
+    {
+      "name": "CodeBuddy Code / WorkBuddy AI（国际版）",
+      "patterns": ["*\\.codebuddy\\skills", "*\\.claude\\skills"]
+    }
+  ]
+}
