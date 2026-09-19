@@ -1,5 +1,8 @@
-import { app, ipcMain, shell } from 'electron'
-import { loadConfig, saveConfig } from './services/config'
+import { app, dialog, ipcMain, nativeTheme, shell } from 'electron'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { configPath, loadConfig, saveConfig } from './services/config'
 import { listAgentStatus } from './services/agents'
 import { detectPresetAgents } from './services/detect'
 import {
@@ -7,6 +10,22 @@ import {
   loadSameSourceGroups,
   type VerifyVerdict
 } from './services/junction-state'
+import {
+  buildMergePlans,
+  createJunction,
+  mergeGroup,
+  planCreate,
+  removeJunction
+} from './services/junction-write'
+import {
+  generateRouter,
+  installSkills,
+  listSkills,
+  removeSkill,
+  translateIntros
+} from './services/skills'
+import { checkSkillUpdates, checkToolUpdate, updateSkills } from './services/updates'
+import { downloadUpdate, installUpdate } from './services/updater'
 import type { AppConfig, IpcResult } from '@shared/types'
 
 function ok<T>(data: T): IpcResult<T> {
@@ -70,7 +89,150 @@ export function registerIpc(): void {
     return { detected, conflicts, failCount }
   })
 
+  // ---------- P4 联接写：建 / 拆 / 归并（UI 层全部二次确认后才调用） ----------
+
+  /** 接入预案（dry-run）：返回迁移清单、内容冲突、同源多根警告，UI 据此弹确认框 */
+  handle('junction:createPlan', (key: string, path: string) => {
+    if (!path || !path.trim()) throw new Error('路径不能为空')
+    return planCreate(key.trim(), path.trim(), loadConfig())
+  })
+
+  /** 接入执行：迁移内容 -> 建联接 -> 写入配置（add-agent.ps1 全流程） */
+  handle('junction:create', (key: string, path: string) => {
+    if (!key || !key.trim()) throw new Error('标识名不能为空')
+    if (!path || !path.trim()) throw new Error('路径不能为空')
+    const config = loadConfig()
+    const result = createJunction(path.trim(), config)
+    config.agents[key.trim()] = path.trim()
+    saveConfig(config)
+    return result
+  })
+
+  /** 拆除联接：只删重解析点，共享库数据保留；配置条目不动（状态会变 missing） */
+  handle('junction:remove', (key: string) => {
+    const config = loadConfig()
+    const path = config.agents[key]
+    if (!path) throw new Error(`配置中找不到 Agent「${key}」`)
+    return removeJunction(path)
+  })
+
+  /** 归并预案：活跃根 >= 2 的同源组，含推荐保留路径 */
+  handle('junction:mergePlan', () => buildMergePlans(loadConfig()))
+
+  /** 归并执行：保留 keepPath，其余活跃根拆联接后重建空目录 */
+  handle('junction:merge', (groupName: string, keepPath: string) =>
+    mergeGroup(groupName, keepPath, loadConfig())
+  )
+
+  // ---------- P5 技能库：列表 / 安装 / 移除 / 翻译 / 路由 ----------
+
+  handle('skills:list', () => listSkills(loadConfig()))
+
+  /** 安装：GitHub / owner/repo / skills.sh 链接；replace=true 时同名技能替换为仓库版本 */
+  handle('skills:install', (url: string, replace: boolean) => {
+    if (!url || !url.trim()) throw new Error('请输入技能仓库链接')
+    return installSkills(loadConfig(), url.trim(), { replace: Boolean(replace) })
+  })
+
+  /** 移除：删除共享库中的技能目录（真实目录才允许；UI 二次确认后调用） */
+  handle('skills:remove', (name: string) => {
+    if (!name || !name.trim()) throw new Error('技能名不能为空')
+    return removeSkill(loadConfig(), name.trim())
+  })
+
+  /** 翻译简介：全库增量（默认）或指定技能；force=true 强制重译 */
+  handle('skills:translate', (name?: string, force?: boolean) =>
+    translateIntros(loadConfig(), { name: name || undefined, force: Boolean(force) })
+  )
+
+  handle('skills:router', () => generateRouter(loadConfig()))
+
+  // ---------- P6 更新检测 ----------
+
+  handle('updates:checkSkills', () => checkSkillUpdates(loadConfig()))
+
+  /** 一键升级：对指定仓库逐个重新安装（-Replace）；UI 二次确认后调用 */
+  handle('updates:updateSkills', (repos: string[]) => {
+    if (!Array.isArray(repos) || repos.length === 0) throw new Error('没有需要升级的仓库')
+    return updateSkills(loadConfig(), repos)
+  })
+
+  handle('updates:checkTool', () => checkToolUpdate(loadConfig(), app.getVersion()))
+
+  /** 下载更新包（electron-updater，GitHub Releases 通道；进度走 update-progress 事件） */
+  handle('updates:downloadUpdate', () => downloadUpdate())
+
+  /** 退出并安装已下载的更新 */
+  handle('updates:installUpdate', () => {
+    installUpdate()
+    return { installing: true }
+  })
+
   handle('app:getVersion', () => app.getVersion())
+
+  // ---------- P7 设置 / 主题 / 导入导出 ----------
+
+  /** 通用配置更新（ui / net 等浅合并字段）；更新后同步 nativeTheme */
+  handle('config:update', (patch: Partial<AppConfig>) => {
+    const config = loadConfig()
+    if (patch.ui !== undefined) config.ui = { ...config.ui, ...patch.ui }
+    if (patch.net !== undefined) config.net = { ...config.net, ...patch.net }
+    if (patch.sharedRoot !== undefined) {
+      if (!patch.sharedRoot.trim()) throw new Error('共享库路径不能为空')
+      config.sharedRoot = patch.sharedRoot.trim()
+    }
+    saveConfig(config)
+    if (config.ui?.theme) nativeTheme.themeSource = config.ui.theme
+    return config
+  })
+
+  /** 导出配置到用户选择的 JSON 文件（含 sharedRoot / agents / ui / net） */
+  handle('config:export', async () => {
+    const config = loadConfig()
+    const r = await dialog.showSaveDialog({
+      title: '导出配置',
+      defaultPath: join(homedir(), 'skills-manager-config.json'),
+      filters: [{ name: 'JSON', extensions: ['json'] }]
+    })
+    if (r.canceled || !r.filePath) return { saved: false }
+    writeFileSync(r.filePath, JSON.stringify(config, null, 2), 'utf8')
+    return { saved: true, path: r.filePath }
+  })
+
+  /** 导入配置：读 JSON → 结构校验 → 覆盖保存（路径不会自动建联接，安全） */
+  handle('config:import', async () => {
+    const r = await dialog.showOpenDialog({
+      title: '导入配置',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      properties: ['openFile']
+    })
+    if (r.canceled || r.filePaths.length === 0) return { imported: false }
+    const file = r.filePaths[0]
+    if (!existsSync(file)) throw new Error(`文件不存在: ${file}`)
+    let parsed: Partial<AppConfig>
+    try {
+      parsed = JSON.parse(readFileSync(file, 'utf8')) as Partial<AppConfig>
+    } catch {
+      throw new Error('配置文件不是合法 JSON')
+    }
+    if (typeof parsed.sharedRoot !== 'string' || !parsed.sharedRoot.trim()) {
+      throw new Error('配置缺少 sharedRoot，拒绝导入')
+    }
+    if (parsed.agents !== undefined && typeof parsed.agents !== 'object') {
+      throw new Error('agents 字段类型不对，拒绝导入')
+    }
+    const config = loadConfig()
+    config.sharedRoot = parsed.sharedRoot.trim()
+    if (parsed.agents) config.agents = parsed.agents as Record<string, string>
+    if (parsed.ui) config.ui = { ...config.ui, ...parsed.ui }
+    if (parsed.net) config.net = { ...config.net, ...parsed.net }
+    saveConfig(config)
+    if (config.ui?.theme) nativeTheme.themeSource = config.ui.theme
+    return { imported: true, config }
+  })
+
+  /** 读取配置文件位置（设置页展示用） */
+  handle('config:path', () => configPath())
 
   // Electron 新版 shell.openPath 返回 Promise<string>：空串表示成功
   handle('shell:openPath', async (path: string) => {

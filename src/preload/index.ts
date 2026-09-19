@@ -12,9 +12,38 @@ const api = {
     status: () => ipcRenderer.invoke('agents:status'),
     detectPresets: () => ipcRenderer.invoke('agents:detectPresets')
   },
+  junction: {
+    createPlan: (key: string, path: string) => ipcRenderer.invoke('junction:createPlan', key, path),
+    create: (key: string, path: string) => ipcRenderer.invoke('junction:create', key, path),
+    remove: (key: string) => ipcRenderer.invoke('junction:remove', key),
+    mergePlan: () => ipcRenderer.invoke('junction:mergePlan'),
+    merge: (groupName: string, keepPath: string) =>
+      ipcRenderer.invoke('junction:merge', groupName, keepPath)
+  },
+  skills: {
+    list: () => ipcRenderer.invoke('skills:list'),
+    install: (url: string, replace: boolean) => ipcRenderer.invoke('skills:install', url, replace),
+    remove: (name: string) => ipcRenderer.invoke('skills:remove', name),
+    translate: (name?: string, force?: boolean) =>
+      ipcRenderer.invoke('skills:translate', name, force),
+    generateRouter: () => ipcRenderer.invoke('skills:router')
+  },
+  updates: {
+    checkSkills: () => ipcRenderer.invoke('updates:checkSkills'),
+    updateSkills: (repos: string[]) => ipcRenderer.invoke('updates:updateSkills', repos),
+    checkTool: () => ipcRenderer.invoke('updates:checkTool'),
+    downloadUpdate: () => ipcRenderer.invoke('updates:downloadUpdate'),
+    installUpdate: () => ipcRenderer.invoke('updates:installUpdate')
+  },
   app: {
     version: () => ipcRenderer.invoke('app:getVersion'),
     openPath: (path: string) => ipcRenderer.invoke('shell:openPath', path)
+  },
+  settings: {
+    update: (patch: unknown) => ipcRenderer.invoke('config:update', patch),
+    exportConfig: () => ipcRenderer.invoke('config:export'),
+    importConfig: () => ipcRenderer.invoke('config:import'),
+    configPath: () => ipcRenderer.invoke('config:path')
   },
   /** 订阅主进程推送的事件（安装进度 / 任务日志 / 更新进度） */
   on: (channel: string, listener: (...args: unknown[]) => void) => {

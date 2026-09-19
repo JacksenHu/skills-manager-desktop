@@ -8,12 +8,16 @@ export interface AppConfig {
   agents: Record<string, string>
   ui?: {
     theme?: 'system' | 'light' | 'dark'
+    /** 关闭窗口时最小化到托盘（默认 true；false = 直接退出） */
+    closeToTray?: boolean
   }
   net?: {
     /** GitHub Token，可选，仅用于提高 API 配额 */
     token?: string
     /** 是否允许对 GitHub 域放宽 TLS 校验（本机代理根证书不在 Node CA 库时的兜底） */
     allowInsecureTls?: boolean
+    /** MyMemory 翻译接口的邮箱（官方 de= 参数，可显著提高匿名每日配额） */
+    translateEmail?: string
   }
 }
 
@@ -92,10 +96,98 @@ export interface SkillInfo {
   commitSha?: string
   installedAt?: string
   translatedAt?: string
+  /** _meta.json 里的本地版本号（市场安装的技能常见，仅展示用） */
+  version?: string
+}
+
+/** P4 联接写操作的日志行（与 PowerShell 脚本输出同款文案，逐条展示给用户） */
+export interface OpResult {
+  logs: string[]
+}
+
+/** 接入前的预案（junction:createPlan 输出，UI 据此做二次确认） */
+export type CreateScenario =
+  | 'missing' // 目录不存在 → 直接建联接
+  | 'already-active' // 已是指向共享库的联接 → 无需处理
+  | 'wrong-target' // 联接指向别处 → 需人工处理（阻塞）
+  | 'real-dir' // 真实目录 → 迁移内容后建联接
+  | 'empty-dir' // 空目录 → 删空目录后建联接
+  | 'not-dir' // 是文件 → 阻塞
+
+export interface CreatePlan {
+  key: string
+  path: string
+  sharedRoot: string
+  scenario: CreateScenario
+  /** already-active / wrong-target 时的联接目标 */
+  target?: string
+  /** real-dir 时：将迁移的每一项及处理方式 */
+  items: { name: string; action: 'move' | 'dedupe' | 'conflict' }[]
+  /** 内容冲突数（>0 阻塞建联接，需人工决定保留哪份） */
+  conflictCount: number
+  /** 同源多根警告（不阻塞，UI 明确提示重复加载风险） */
+  duplicateWarnings: SameSourceConflict[]
+  blocked: boolean
+  blockedReason?: string
+}
+
+/** 归并预案里的一条技能根 */
+export interface MergePlanHit {
+  path: string
+  state: JunctionState
+  /** 推荐保留（覆盖软件最多的共享根，通常 .agents\skills） */
+  recommended: boolean
+  /** 该根同时还会被哪些软件读取（按组表反查） */
+  alsoReadBy: string[]
+}
+
+/** 一个同源组的归并预案（junction:mergePlan 输出；活跃根 >= 2 才出现） */
+export interface MergePlan {
+  name: string
+  hits: MergePlanHit[]
+  /** 默认推荐保留的路径 */
+  keepPath: string
 }
 
 /** 更新检测的四类判定（与 PowerShell 版一致） */
 export type UpdateState = 'up-to-date' | 'has-update' | 'no-baseline' | 'unavailable'
+
+/** 单个来源仓库的更新检测判定（check-updates.ps1 的六种细分状态） */
+export type RepoUpdateState = 'latest' | 'update' | 'no-baseline' | 'rate-limited' | 'gone' | 'error'
+
+export interface RepoUpdateInfo {
+  /** owner/repo */
+  repo: string
+  /** 该仓库装进共享库的技能名列表（同仓库多技能共用一个基准） */
+  skills: string[]
+  state: RepoUpdateState
+  localSha?: string
+  remoteSha?: string
+}
+
+/** updates:checkSkills 的返回 */
+export interface CheckUpdatesResult {
+  repos: RepoUpdateInfo[]
+  /** 无 GitHub 来源的技能（迁移/手动放置/市场安装），仅展示本地版本 */
+  noSource: { name: string; version?: string }[]
+}
+
+/** 工具自身更新检测（check-project-updates.ps1 四类判定） */
+export interface ToolUpdateInfo {
+  state: UpdateState
+  localVersion: string
+  remoteVersion?: string
+  /** unavailable 时的原因（auth / notfound / net） */
+  reason?: string
+}
+
+/** electron-updater 下载进度（update-progress 事件负载） */
+export interface UpdateDownloadProgress {
+  percent: number
+  transferred: number
+  total: number
+  bytesPerSecond: number
+}
 
 export interface SkillUpdateInfo extends SkillInfo {
   state: UpdateState

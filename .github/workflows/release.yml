@@ -1,0 +1,44 @@
+name: Release
+
+# 打 tag（v*）自动出 Windows 安装包并发布到 GitHub Releases
+#（release 产物含 latest.yml，供已安装用户经 electron-updater 自动更新）
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npx electron-vite build
+
+      - name: Verify tag matches package.json version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="v$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "tag $TAG != package.json version $VERSION"; exit 1
+          fi
+
+      - name: Package & publish
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -72,12 +72,24 @@ export function detectPresetAgents(config: AppConfig): DetectedAgent[] {
       const installed = preset.probePath
         ? existsSync(expandPath(preset.probePath))
         : existsSync(path)
+      // 动态预设（Marvis 多用户）接入时配置键会派生为 `${key}-<用户ID>`（App.startConnect 同规则），
+      // 这里反查实际配置键，保证 configured 判定与「拆除」操作用的是真实键名
+      let key = preset.key
+      if (preset.dynamic) {
+        const hit = Object.entries(config.agents).find(
+          ([, p]) => p.toLowerCase() === path.toLowerCase()
+        )
+        if (hit) key = hit[0]
+      }
+      const configured = preset.dynamic
+        ? Object.values(config.agents).some((p) => p.toLowerCase() === path.toLowerCase())
+        : config.agents[preset.key] === path
       out.push({
-        key: preset.key,
+        key,
         presetLabel: preset.label,
         label: preset.label,
         path,
-        configured: config.agents[preset.key] === path,
+        configured,
         installed,
         state: toJunctionState(result.verdict),
         target: result.target,
