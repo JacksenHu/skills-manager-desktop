@@ -40,7 +40,8 @@
     "publish": {
       "provider": "github",
       "owner": "JacksenHu",
-      "repo": "skills-manager-desktop"
+      "repo": "skills-manager-desktop",
+      "releaseType": "release"
     },
     "win": {
       "icon": "resources/icon.ico",
