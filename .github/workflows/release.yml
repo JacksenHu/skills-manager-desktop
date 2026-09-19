@@ -42,3 +42,12 @@ jobs:
         run: npx electron-builder --win --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # electron-builder 默认（或复用旧 draft）可能把 release 留在草稿态，这里强制转正
+      - name: Make release public
+        shell: bash
+        run: |
+          gh release edit "v$(node -p "require('./package.json').version")" --draft=false || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
