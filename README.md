@@ -67,7 +67,8 @@ PowerShell 源码路径可用 `SKILLS_PS_ROOT` 环境变量覆盖。
 - [x] P7 设置 / 主题 / 托盘 / 导入导出：设置页（共享库路径 / Agent 配置管理 / 主题三态 / 关闭行为 / GitHub Token / 翻译邮箱 / TLS 开关 / 导入导出 / 关于）、关闭最小化到托盘、主题持久化跟随系统（nativeTheme 同步渲染进程）
 - [x] P8 打包分发：electron-builder NSIS（`npm run dist`），产物 `release/SkillsManager Setup <版本>.exe`（约 108 MB，x64）+ `release/win-unpacked/` 免安装目录；应用图标 / 托盘图标为脚本生成的自绘 PNG/ICO（链环构图）
 - [x] 自动更新：electron-updater（GitHub Releases 通道，用户触发下载/安装，更新页有进度条）
-- [x] 自动发布：push tag `v*` 触发 GitHub Actions（`.github/workflows/release.yml`），构建 → 校验 tag 与 package.json 版本一致 → `electron-builder --publish always` 发布 Release（含 latest.yml 供自动更新）
+- [x] 自动发布：push tag `v*` 触发 GitHub Actions（`.github/workflows/release.yml`），构建 → 校验 tag 与 package.json 版本一致 → 发布 Release（含 latest.yml 供自动更新）
+- [x] SkillHub 市场：对接 skillhub.cn 平台（导航 SkillHub 页：排序标签 / 分类筛选 / 关键词搜索 / 卡片详情弹窗 / 一键安装含 sha256 校验，GitHub 上游技能自动建更新基准）
 
 ## 发布流程
 
