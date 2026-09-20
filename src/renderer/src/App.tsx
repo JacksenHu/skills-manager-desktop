@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { HardDrive, Link2, Monitor, Moon, RefreshCw, Search, Settings, Sun } from 'lucide-react'
+import { HardDrive, Link2, Monitor, Moon, RefreshCw, Search, Settings, Store, Sun } from 'lucide-react'
 import type {
   AgentStatus,
   AppConfig,
@@ -11,16 +11,18 @@ import type {
 } from '@shared/types'
 import { AgentCard } from './components/AgentCard'
 import { SkillsPanel } from './components/SkillsPanel'
+import { SkillHubPanel } from './components/SkillHubPanel'
 import { UpdatesPanel } from './components/UpdatesPanel'
 import { SettingsPanel } from './components/SettingsPanel'
 import { CreateConfirm, MergeConfirm, ResultModal, ConfirmDialog, Modal } from './components/Modal'
 
-type Tab = 'connect' | 'detect' | 'skills' | 'updates'
+type Tab = 'connect' | 'detect' | 'skills' | 'hub' | 'updates'
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'connect', label: '联接' },
   { key: 'detect', label: '探测' },
   { key: 'skills', label: '技能库' },
+  { key: 'hub', label: 'SkillHub' },
   { key: 'updates', label: '更新' }
 ]
 
@@ -328,6 +330,7 @@ export default function App() {
         )}
 
         {tab === 'skills' && <SkillsPanel refreshTick={refreshTick} config={config} />}
+        {tab === 'hub' && <SkillHubPanel refreshTick={refreshTick} config={config} />}
         {tab === 'updates' && <UpdatesPanel refreshTick={refreshTick} />}
       </main>
 

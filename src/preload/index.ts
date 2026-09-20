@@ -35,6 +35,18 @@ const api = {
     setSource: (name: string, url: string) => ipcRenderer.invoke('skills:setSource', name, url),
     searchRepos: (keyword: string) => ipcRenderer.invoke('skills:searchRepos', keyword)
   },
+  hub: {
+    bootstrap: () => ipcRenderer.invoke('hub:bootstrap'),
+    listWithCategories: (opts: {
+      page?: number
+      sortBy?: string
+      keyword?: string
+      category?: string
+    }) => ipcRenderer.invoke('hub:listWithCategories', opts),
+    detail: (slug: string, namespace: string) => ipcRenderer.invoke('hub:detail', slug, namespace),
+    install: (slug: string, namespace: string, replace?: boolean) =>
+      ipcRenderer.invoke('hub:install', slug, namespace, replace)
+  },
   updates: {
     checkSkills: () => ipcRenderer.invoke('updates:checkSkills'),
     updateSkills: (repos: string[]) => ipcRenderer.invoke('updates:updateSkills', repos),

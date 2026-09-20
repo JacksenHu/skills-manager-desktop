@@ -110,7 +110,7 @@ export interface SkillMeta {
   [key: string]: unknown
 }
 
-function readMeta(dir: string): SkillMeta {
+export function readMeta(dir: string): SkillMeta {
   const p = join(dir, '_meta.json')
   if (!existsSync(p)) return {}
   try {
@@ -121,7 +121,7 @@ function readMeta(dir: string): SkillMeta {
 }
 
 /** 合并写回：JSON.parse 保序，{...old, ...updates} 保留原有键序、新键追加（PS ordered 合并同效果） */
-function writeMeta(dir: string, updates: SkillMeta): void {
+export function writeMeta(dir: string, updates: SkillMeta): void {
   const merged = { ...readMeta(dir), ...updates }
   writeFileSync(join(dir, '_meta.json'), JSON.stringify(merged, null, 2), 'utf8')
 }

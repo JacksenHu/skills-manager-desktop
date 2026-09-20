@@ -11,6 +11,12 @@ import {
   type VerifyVerdict
 } from './services/junction-state'
 import {
+  fetchHubCategories,
+  fetchHubSkillDetail,
+  installHubSkill,
+  listHubSkills
+} from './services/hub'
+import {
   buildMergePlans,
   createJunction,
   mergeGroup,
@@ -177,6 +183,60 @@ export function registerIpc(): void {
   handle('skills:searchRepos', (keyword: string) => {
     if (!keyword?.trim()) throw new Error('搜索关键词不能为空')
     return searchRepos(loadConfig(), keyword.trim())
+  })
+
+  // ---------- SkillHub 平台 ----------
+
+  handle('hub:list', (opts: { page?: number; pageSize?: number; sortBy?: string; keyword?: string; category?: string }) => {
+    const cfg = loadConfig()
+    return listHubSkills(cfg, {
+      page: Math.max(1, Number(opts?.page) || 1),
+      pageSize: Math.min(60, Math.max(6, Number(opts?.pageSize) || 24)),
+      sortBy: (['score', 'updated_at', 'downloads', 'installs'] as const).includes(opts?.sortBy as never)
+        ? (opts!.sortBy as 'score' | 'updated_at' | 'downloads' | 'installs')
+        : 'score',
+      keyword: opts?.keyword,
+      category: opts?.category
+    })
+  })
+
+  /** 列表 + 分类一起拉（分类映射用于卡片中文名） */
+  handle('hub:bootstrap', async () => {
+    const cfg = loadConfig()
+    const categories = await fetchHubCategories(cfg)
+    const list = await listHubSkills(cfg, { page: 1, pageSize: 24, sortBy: 'score', categories })
+    return { categories, ...list }
+  })
+
+  handle('hub:listWithCategories', async (opts: { page?: number; sortBy?: string; keyword?: string; category?: string }) => {
+    const cfg = loadConfig()
+    const categories = await fetchHubCategories(cfg)
+    const list = await listHubSkills(cfg, {
+      page: Math.max(1, Number(opts?.page) || 1),
+      pageSize: 24,
+      sortBy: (['score', 'updated_at', 'downloads', 'installs'] as const).includes(opts?.sortBy as never)
+        ? (opts!.sortBy as 'score' | 'updated_at' | 'downloads' | 'installs')
+        : 'score',
+      keyword: opts?.keyword,
+      category: opts?.category,
+      categories
+    })
+    return { categories, ...list }
+  })
+
+  handle('hub:detail', async (slug: string, namespace: string) => {
+    const cfg = loadConfig()
+    const categories = await fetchHubCategories(cfg)
+    return fetchHubSkillDetail(cfg, slug, namespace, categories)
+  })
+
+  /** 安装 SkillHub 技能（GitHub 上游走既有安装链路；原生技能走文件下载 + sha256 校验） */
+  handle('hub:install', async (slug: string, namespace: string, replace?: boolean) => {
+    const cfg = loadConfig()
+    return installHubSkill(cfg, slug, namespace, {
+      replace: replace !== false,
+      githubInstaller: (url) => installSkills(cfg, url, { replace: true })
+    })
   })
 
   // ---------- P6 更新检测 ----------

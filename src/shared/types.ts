@@ -203,6 +203,60 @@ export interface RepoSearchResult {
   url: string
 }
 
+/** SkillHub 平台分类（api.skillhub.cn /api/v1/categories） */
+export interface HubCategory {
+  key: string
+  name: string
+}
+
+/** SkillHub 技能列表项（/api/skills 投影） */
+export interface HubSkill {
+  slug: string
+  /** namespace handle，如 indiv-ebandao */
+  namespace: string
+  name: string
+  /** 平台英文分类 key */
+  category: string
+  /** 平台中文分类名 */
+  categoryName: string
+  description: string
+  downloads: number
+  installs: number
+  stars: number
+  verified: boolean
+  version: string
+  iconUrl?: string
+  updatedAt: number
+  /** 详情页链接 */
+  hubUrl: string
+}
+
+export interface HubListResult {
+  skills: HubSkill[]
+  total: number
+  page: number
+}
+
+/** SkillHub 技能详情（/api/v1/skills/{slug} 投影） */
+export interface HubSkillDetail extends HubSkill {
+  /** 中文摘要 */
+  summary: string
+  /** README 全文（可能为空） */
+  overviewMd: string
+  createdAt: number
+  versionsCount: number
+  filesCount: number
+  /** GitHub 上游链接（有则可直接从 GitHub 安装并建更新基准） */
+  upstreamUrl?: string
+  /** 需配置 API Key */
+  requiresApiKey: boolean
+}
+
+export interface HubInstallOptions {
+  /** 同名技能已存在时覆盖（默认 true） */
+  replace?: boolean
+}
+
 /** 工具的历史发布记录（GitHub Releases，用于展示更新说明 / 更新日志） */
 export interface ToolReleaseInfo {
   tagName: string
