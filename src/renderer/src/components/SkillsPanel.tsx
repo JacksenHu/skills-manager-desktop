@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { FolderOpen, Info, Languages, Link2, Plus, RefreshCw, Route, Search, Sparkles, Tag, Tags, Trash2, X } from 'lucide-react'
-import type { AppConfig, IpcResult, OpResult, RepoSearchResult, SkillInfo } from '@shared/types'
-import { ConfirmDialog, Modal, ResultModal } from './Modal'
+import { Boxes, FolderOpen, Info, Languages, Link2, Plus, RefreshCw, Route, Search, Sparkles, Tag, Tags, Trash2, X } from 'lucide-react'
+import type { AppConfig, IpcResult, OpResult, RepoSearchResult, RouterTarget, SkillInfo } from '@shared/types'
+import { ConfirmDialog, Modal, ResultModal, RouterConfirm } from './Modal'
 
 const CATEGORY_ORDER = [
   '开发与工程',
@@ -12,6 +12,7 @@ const CATEGORY_ORDER = [
   '设计与创意',
   '音视频与媒体',
   'Agent 与技能管理',
+  '套件',
   '生活与日常',
   '未分类'
 ] as const
@@ -146,6 +147,11 @@ export function SkillsPanel({
   const [batchSearchRow, setBatchSearchRow] = useState<string | null>(null)
   const [keyword, setKeyword] = useState('')
 
+  // 生成路由：目标技能根多选
+  const [routerOpen, setRouterOpen] = useState(false)
+  const [routerTargets, setRouterTargets] = useState<RouterTarget[]>([])
+  const [routerSelected, setRouterSelected] = useState<Set<string>>(new Set())
+
   const run = useCallback(async () => {
     setLoading(true)
     try {
@@ -215,9 +221,45 @@ export function SkillsPanel({
     }
     return list
   }, [skills, filter, keyword, config])
+
+  /** 套件分组（filter=套件 时的套件卡片网格数据） */
+  const suiteGroups = useMemo(() => {
+    const m = new Map<string, { marketplace: string; plugin: string; version?: string; members: SkillInfo[] }>()
+    for (const s of skills) {
+      if (!s.package) continue
+      const key = `${s.package.marketplace}/${s.package.plugin}`
+      const g = m.get(key) ?? { marketplace: s.package.marketplace, plugin: s.package.plugin, version: s.package.version, members: [] }
+      g.members.push(s)
+      if (s.package.version && !g.version) g.version = s.package.version
+      m.set(key, g)
+    }
+    return [...m.values()]
+  }, [skills])
+
   const noSourceCount = skills.filter((s) => !s.source).length
-  const hasRouter = skills.some((s) => s.name === 'router-guide')
+  const hasRouter = skills.some((s) => s.name === 'skill-router')
   const [routerTipDismissed, setRouterTipDismissed] = useState(false)
+
+  /** 启停技能 */
+  const toggleEnabled = useCallback(
+    async (s: SkillInfo) => {
+      const target = !s.enabled
+      const r = (await window.api.skills.toggle(s.name, target)) as IpcResult<OpResult>
+      if (!r.ok) {
+        setError(r.error)
+        return
+      }
+      void run()
+    },
+    [run]
+  )
+
+  /** 组套件 / 解散 */
+  const [groupOpen, setGroupOpen] = useState(false)
+  const [groupName, setGroupName] = useState('')
+  const [groupSel, setGroupSel] = useState<Set<string>>(new Set())
+
+  const [suiteDetail, setSuiteDetail] = useState<{ marketplace: string; plugin: string; version?: string; members: SkillInfo[] } | null>(null)
 
   return (
     <>
@@ -244,11 +286,22 @@ export function SkillsPanel({
         </button>
         <button
           onClick={() => {
-            setBusy('router')
-            void execute('生成路由技能', () => window.api.skills.generateRouter())
+            void (async () => {
+              try {
+                const r = (await window.api.skills.routerTargets()) as IpcResult<RouterTarget[]>
+                if (!r.ok) throw new Error(r.error)
+                setRouterTargets(r.data)
+                setRouterSelected(
+                  new Set(r.data.filter((t) => t.exists && t.skillCount > 0).map((t) => t.key))
+                )
+                setRouterOpen(true)
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e))
+              }
+            })()
           }}
           disabled={busy !== null}
-          title="生成 / 刷新 skill-router 总路由技能"
+          title="检测各 Agent 技能根里实际启用的技能，生成 / 刷新套件入口 skill-router（清单只收录真实可调用的技能）"
           className="flex items-center gap-1.5 rounded-lg bg-sky-500/10 px-3 py-1.5 text-sm text-sky-500 transition hover:bg-sky-500/20 disabled:opacity-50"
         >
           <Route className={`h-3.5 w-3.5 ${busy === 'router' ? 'animate-pulse' : ''}`} />
@@ -267,6 +320,18 @@ export function SkillsPanel({
             补全来源（{noSourceCount}）
           </button>
         )}
+        <button
+          onClick={() => {
+            setGroupName('')
+            setGroupSel(new Set())
+            setGroupOpen(true)
+          }}
+          title="把技能库现有技能组成自定义套件（统一套件标记，可整组管理）"
+          className="flex items-center gap-1.5 rounded-lg bg-red-500/10 px-3 py-1.5 text-sm text-red-500 transition hover:bg-red-500/20"
+        >
+          <Boxes className="h-3.5 w-3.5" />
+          组套件
+        </button>
         <button
           onClick={() => void run()}
           disabled={loading}
@@ -334,8 +399,9 @@ export function SkillsPanel({
         <div className="mb-4 flex items-start gap-2 rounded-lg bg-sky-500/10 px-4 py-3 text-sm text-sky-600 ring-1 ring-sky-500/30 dark:text-sky-400">
           <Info className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="min-w-0 flex-1">
-            <b>skill-router 路由技能不会自动触发</b>
-            ：请在各 Agent 的新会话里手动选择 / 点名 skill-router 启用一次，它才会按索引为你的任务推荐技能。
+            <b>套件入口 skill-router 不会自动触发</b>
+            ：整个技能库被当成一个套件，用「生成路由」把它写到各 Agent 的真实加载目录后，
+            在该 Agent 的<b>新会话</b>里点名 skill-router 并描述需求，它就会按清单匹配技能并直接执行。
           </div>
           <button
             onClick={() => setRouterTipDismissed(true)}
@@ -355,14 +421,53 @@ export function SkillsPanel({
         </div>
       )}
 
-      {/* 技能卡片 */}
-      {visible.length === 0 ? (
+      {/* 套件分类 → 套件卡片网格；其他分类 → 技能卡片 */}
+      {filter === '套件' && suiteGroups.length > 0 ? (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {suiteGroups.map((g) => {
+            const key = `${g.marketplace}/${g.plugin}`
+            const enabledCount = g.members.filter((m) => m.enabled !== false).length
+            const isCustom = g.marketplace === 'custom'
+            return (
+              <div
+                key={key}
+                onClick={() => setSuiteDetail(g)}
+                className="group cursor-pointer rounded-xl border border-slate-200 bg-white p-4 transition hover:border-red-400/60 hover:shadow-lg hover:shadow-red-500/5 dark:border-slate-800 dark:bg-slate-900"
+              >
+                <div className="flex items-start gap-2.5">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-500/15">
+                    <Boxes className="h-4 w-4 text-red-500" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium">{g.plugin}</div>
+                    <div className="text-[10px] text-slate-400">
+                      {isCustom ? '自定义套件' : g.marketplace}
+                      {g.version ? ` · v${g.version}` : ''}
+                    </div>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] text-red-500">套件</span>
+                </div>
+                <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  {g.members.length} 个技能 · {enabledCount} 启用 / {g.members.length - enabledCount} 停用
+                </div>
+                <div className="mt-1 line-clamp-1 text-[10px] text-slate-400">
+                  {g.members.map((m) => m.name).join('、')}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : visible.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 p-10 text-center dark:border-slate-700">
-          <div className="font-medium">{skills.length === 0 ? '共享库还是空的' : '该分类下没有技能'}</div>
+          <div className="font-medium">
+            {skills.length === 0 ? '共享库还是空的' : filter === '套件' ? '还没有套件' : '该分类下没有技能'}
+          </div>
           <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             {skills.length === 0
               ? '点「安装技能」粘贴 GitHub 或 skills.sh 链接，装进来的技能所有已接入的 Agent 共用。'
-              : '换个分类看看，或点「安装技能」补充新技能。'}
+              : filter === '套件'
+                ? '去 SkillHub 页的「套件」装市场套件，或点上方「组套件」把现有技能组成自定义套件。'
+                : '换个分类看看，或点「安装技能」补充新技能。'}
           </div>
         </div>
       ) : (
@@ -385,6 +490,7 @@ export function SkillsPanel({
                 setSourceTarget(s)
                 setSourceUrl(s.source ?? '')
               }}
+              onToggle={() => void toggleEnabled(s)}
             />
           ))}
         </div>
@@ -738,6 +844,143 @@ export function SkillsPanel({
         </Modal>
       )}
 
+      {/* 组套件弹窗 */}
+      {groupOpen && (
+        <Modal title="组自定义套件" onClose={() => setGroupOpen(false)} width="max-w-2xl">
+          <div className="space-y-3 text-sm">
+            <input
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              placeholder="套件名称（如 my-daily-suite）"
+              className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-xs outline-none focus:border-sky-400 dark:border-slate-600"
+            />
+            <div className="max-h-72 space-y-1 overflow-auto rounded-lg bg-slate-50 p-2 dark:bg-slate-950">
+              {skills.map((s) => (
+                <label
+                  key={s.name}
+                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <input
+                    type="checkbox"
+                    checked={groupSel.has(s.name)}
+                    onChange={(e) => {
+                      const next = new Set(groupSel)
+                      if (e.target.checked) next.add(s.name)
+                      else next.delete(s.name)
+                      setGroupSel(next)
+                    }}
+                    className="accent-sky-500"
+                  />
+                  <span className="truncate font-mono text-xs">{s.name}</span>
+                  {s.package && (
+                    <span className="text-[10px] text-red-400">
+                      当前：{s.package.plugin}@{s.package.marketplace}
+                    </span>
+                  )}
+                  {s.enabled === false && <span className="text-[10px] text-slate-400">已停用</span>}
+                </label>
+              ))}
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              勾选 {groupSel.size} 个技能。成员会统一打上套件标记并归类「套件」分类（红色标识）；已是其他套件成员的技能会被移入新套件。
+            </div>
+          </div>
+          <div className="mt-5 flex justify-end gap-2">
+            <button
+              onClick={() => setGroupOpen(false)}
+              className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+            >
+              取消
+            </button>
+            <button
+              onClick={() => {
+                if (!groupName.trim() || groupSel.size === 0) return
+                const name = groupName.trim()
+                setGroupOpen(false)
+                setBusy('category')
+                void execute(`组套件：${name}`, () => window.api.skills.groupPackage(name, [...groupSel]))
+              }}
+              disabled={!groupName.trim() || groupSel.size === 0}
+              className="rounded-lg bg-red-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-600 disabled:opacity-50"
+            >
+              组成套件
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* 套件详情弹窗（技能库 · 套件分类下的卡片） */}
+      {suiteDetail && (
+        <Modal
+          title={`套件：${suiteDetail.plugin}`}
+          onClose={() => setSuiteDetail(null)}
+          width="max-w-2xl"
+        >
+          <div className="space-y-3 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-xs text-red-500">套件</span>
+              {suiteDetail.version && <span className="text-xs text-slate-400">v{suiteDetail.version}</span>}
+              <span className="ml-auto text-xs text-slate-400">
+                {suiteDetail.marketplace === 'custom' ? '自定义套件' : `市场 ${suiteDetail.marketplace}`} ·{' '}
+                {suiteDetail.members.length} 个技能
+              </span>
+            </div>
+            <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-950">
+              <div className="mb-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">成员技能（可单独启停）：</div>
+              <div className="max-h-64 space-y-1.5 overflow-auto">
+                {suiteDetail.members.map((m) => (
+                  <div key={m.name} className="flex items-center gap-2 rounded px-1 py-0.5">
+                    <span className="min-w-0 flex-1 truncate font-mono text-xs">{m.name}</span>
+                    <button
+                      onClick={() => void toggleEnabled(m)}
+                      title={m.enabled !== false ? '点击停用（Agent 不再加载）' : '点击启用（移回共享库）'}
+                      className={
+                        'relative h-5 w-9 shrink-0 rounded-full transition ' +
+                        (m.enabled !== false ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600')
+                      }
+                    >
+                      <span
+                        className={
+                          'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ' +
+                          (m.enabled !== false ? 'left-[18px]' : 'left-0.5')
+                        }
+                      />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              停用 = 技能移出共享库（Agent 不加载，数据保留在 skills-disabled 区）；启用 = 移回共享库。
+            </div>
+          </div>
+          <div className="mt-5 flex justify-between">
+            {suiteDetail.marketplace === 'custom' ? (
+              <button
+                onClick={async () => {
+                  const name = suiteDetail.plugin
+                  const r = (await window.api.skills.ungroupPackage(name)) as IpcResult<OpResult>
+                  setSuiteDetail(null)
+                  if (r.ok) setResult({ title: `解散套件：${name}`, logs: r.data.logs })
+                  else setError(r.error)
+                }}
+                className="rounded-lg px-3 py-1.5 text-sm text-red-500 hover:bg-red-500/10"
+              >
+                解散此套件（保留技能，去除标记）
+              </button>
+            ) : (
+              <span />
+            )}
+            <button
+              onClick={() => setSuiteDetail(null)}
+              className="rounded-lg bg-sky-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-600"
+            >
+              关闭
+            </button>
+          </div>
+        </Modal>
+      )}
+
       {/* 移除确认 */}
       {removeTarget && (
         <ConfirmDialog
@@ -762,6 +1005,41 @@ export function SkillsPanel({
         </ConfirmDialog>
       )}
 
+      {/* 生成路由：选目标技能根 */}
+      {routerOpen && (
+        <RouterConfirm
+          targets={routerTargets}
+          selected={routerSelected}
+          onToggle={(k) =>
+            setRouterSelected((prev) => {
+              const next = new Set(prev)
+              if (next.has(k)) next.delete(k)
+              else next.add(k)
+              return next
+            })
+          }
+          onSelectAll={(all) =>
+            setRouterSelected(
+              all
+                ? new Set(
+                    routerTargets.filter((t) => t.exists && t.skillCount > 0).map((t) => t.key)
+                  )
+                : new Set()
+            )
+          }
+          busy={busy === 'router'}
+          onConfirm={() => {
+            setBusy('router')
+            void execute(
+              '生成套件路由技能',
+              () => window.api.skills.generateRouter([...routerSelected]),
+              () => setRouterOpen(false)
+            )
+          }}
+          onClose={() => setRouterOpen(false)}
+        />
+      )}
+
       {result && (
         <ResultModal title={result.title} logs={result.logs} onClose={() => setResult(null)} />
       )}
@@ -775,7 +1053,8 @@ function SkillCard({
   onTranslate,
   onRemove,
   onCategory,
-  onSource
+  onSource,
+  onToggle
 }: {
   skill: SkillInfo
   busy: boolean
@@ -783,25 +1062,57 @@ function SkillCard({
   onRemove: () => void
   onCategory: () => void
   onSource: () => void
+  onToggle: () => void
 }) {
   const intro = skill.introZh || skill.intro
+  const enabled = skill.enabled !== false
   return (
-    <div className="group rounded-xl border border-slate-200 bg-white p-4 transition hover:border-sky-400/60 dark:border-slate-800 dark:bg-slate-900">
+    <div
+      className={
+        'group rounded-xl border border-slate-200 bg-white p-4 transition hover:border-sky-400/60 dark:border-slate-800 dark:bg-slate-900 ' +
+        (enabled ? '' : 'opacity-60')
+      }
+    >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="truncate font-medium">{skill.name}</span>
-            {skill.name === 'router-guide' && (
+            {skill.package && (
+              <span
+                className="flex shrink-0 items-center gap-1 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] text-red-500"
+                title={`套件成员：${skill.package.plugin}@${skill.package.marketplace}${skill.package.version ? ` v${skill.package.version}` : ''}`}
+              >
+                <Boxes className="h-3 w-3" />
+                套件
+              </span>
+            )}
+            {skill.name === 'skill-router' && (
               <span
                 className="flex shrink-0 items-center gap-1 rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] text-sky-500"
-                title="路由技能：需在 Agent 会话中手动选择 / 点名 skill-router 启用"
+                title="技能套件总入口：在新会话里点名 skill-router 并描述需求，它会按清单匹配技能"
               >
                 <Route className="h-3 w-3" />
-                路由·需手动启用
+                套件入口
               </span>
             )}
           </div>
         </div>
+        {/* 启停开关：开=共享库启用（Agent 加载），关=移出共享库停用 */}
+        <button
+          onClick={onToggle}
+          title={enabled ? '已在共享库启用，点击停用（Agent 不再加载，数据保留）' : '已停用，点击启用（移回共享库）'}
+          className={
+            'relative h-5 w-9 shrink-0 rounded-full transition ' +
+            (enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600')
+          }
+        >
+          <span
+            className={
+              'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ' +
+              (enabled ? 'left-[18px]' : 'left-0.5')
+            }
+          />
+        </button>
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${chipCls(skill.category)}`}>
           {skill.category}
         </span>
@@ -812,9 +1123,15 @@ function SkillCard({
       </div>
 
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-400 dark:text-slate-500">
+        {skill.package && (
+          <span className="max-w-full truncate text-red-400/90">
+            {skill.package.plugin}@{skill.package.marketplace}
+            {skill.package.version ? ` v${skill.package.version}` : ''}
+          </span>
+        )}
         {skill.source ? (
           <span className="max-w-full truncate" title={skill.source}>
-            来源 {skill.source.replace('https://github.com/', '')}
+            来源 {skill.source.replace('https://github.com/', '').replace('https://skillhub.cn/skills/', 'SkillHub:')}
             {skill.branch ? `@${skill.branch}` : ''}
           </span>
         ) : (
@@ -824,6 +1141,7 @@ function SkillCard({
         {!skill.version && skill.commitSha && <span>基准 {skill.commitSha.slice(0, 7)}</span>}
         {skill.installedAt && <span>装于 {skill.installedAt.slice(0, 10)}</span>}
         {skill.introZh && skill.translatedAt && <span>译于 {skill.translatedAt.slice(0, 10)}</span>}
+        {!enabled && <span className="text-slate-400">已停用</span>}
       </div>
 
       <div className="mt-3 flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">

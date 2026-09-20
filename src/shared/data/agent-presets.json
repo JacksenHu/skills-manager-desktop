@@ -33,6 +33,13 @@
       "probePath": "%USERPROFILE%\\.workbuddy"
     },
     {
+      "key": "workbuddy-ai",
+      "label": "WorkBuddy AI（桌面版用户技能）",
+      "path": "%USERPROFILE%\\.workbuddy-ai\\skills",
+      "probePath": "%USERPROFILE%\\.workbuddy-ai",
+      "desktopOnly": true
+    },
+    {
       "key": "codebuddy",
       "label": "CodeBuddy Code / WorkBuddy AI（国际版）",
       "path": "%USERPROFILE%\\.codebuddy\\skills",

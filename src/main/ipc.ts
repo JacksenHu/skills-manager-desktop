@@ -19,6 +19,17 @@ import {
   applyHubSource
 } from './services/hub'
 import {
+  BUILTIN_MARKETS,
+  installMarketPlugin,
+  listMarketSources,
+  resolveMarketplace
+} from './services/marketplaces'
+import {
+  groupCustomPackage,
+  toggleSkillEnabled,
+  ungroupCustomPackage
+} from './services/skills'
+import {
   buildMergePlans,
   createJunction,
   mergeGroup,
@@ -32,6 +43,7 @@ import {
   listCustomCategories,
   removeSkill,
   renameCategory,
+  resolveRouterTargets,
   searchRepos,
   setSkillCategory,
   setSkillSource,
@@ -158,7 +170,11 @@ export function registerIpc(): void {
     translateIntros(loadConfig(), { name: name || undefined, force: Boolean(force) })
   )
 
-  handle('skills:router', () => generateRouter(loadConfig()))
+  /** 路由目标列表：所有可写入的技能根（配置过的 + 预设里存在的），UI 里可选子集 */
+  handle('skills:routerTargets', () => resolveRouterTargets(loadConfig()))
+
+  /** 生成套件路由技能：写到目标 Agent 的真实技能根，清单按该根实际可见技能生成 */
+  handle('skills:router', (targetKeys?: string[]) => generateRouter(loadConfig(), { targetKeys }))
 
   /** 手动指定技能分类（空串恢复自动分类） */
   handle('skills:setCategory', (name: string, category: string) => {
@@ -273,6 +289,74 @@ export function registerIpc(): void {
     return { logs }
   })
 
+  // ---------- 套件市场 ----------
+
+  /** 市场列表（内置 + 自定义） */
+  handle('market:sources', (cfg?: AppConfig) => listMarketSources(cfg ?? loadConfig()))
+
+  /** 添加自定义市场来源 */
+  handle('market:addSource', (source: { name: string; type: 'git' | 'zip' | 'directory'; url: string }) => {
+    const config = loadConfig()
+    const name = String(source?.name ?? '').trim()
+    const url = String(source?.url ?? '').trim()
+    const type = source?.type
+    if (!name || !url || !['git', 'zip', 'directory'].includes(type)) {
+      throw new Error('市场名称、类型与来源地址均不能为空')
+    }
+    config.marketplaces = config.marketplaces ?? []
+    if ([...BUILTIN_MARKETS, ...config.marketplaces].some((m) => m.name === name)) {
+      throw new Error(`市场「${name}」已存在`)
+    }
+    config.marketplaces.push({ name, type, url })
+    saveConfig(config)
+    return config
+  })
+
+  /** 删除自定义市场来源（内置不可删） */
+  handle('market:removeSource', (name: string) => {
+    const config = loadConfig()
+    if (BUILTIN_MARKETS.some((m) => m.name === name)) throw new Error('内置市场不可删除')
+    config.marketplaces = (config.marketplaces ?? []).filter((m) => m.name !== name)
+    saveConfig(config)
+    return config
+  })
+
+  /** 拉取并解析市场清单（套件卡片列表） */
+  handle('market:list', async (name: string) => {
+    const cfg = loadConfig()
+    const source = listMarketSources(cfg).find((m) => m.name === name)
+    if (!source) throw new Error(`市场不存在: ${name}`)
+    const { manifest } = await resolveMarketplace(cfg, source)
+    return manifest
+  })
+
+  /** 安装套件（成员技能平铺进共享库 + 打套件标记） */
+  handle('market:install', async (marketName: string, pluginName: string) => {
+    const cfg = loadConfig()
+    const source = listMarketSources(cfg).find((m) => m.name === marketName)
+    if (!source) throw new Error(`市场不存在: ${marketName}`)
+    return installMarketPlugin(cfg, source, pluginName)
+  })
+
+  /** 启停技能（停用 = 移出共享库，Agent 不加载） */
+  handle('skills:toggle', (name: string, enabled: boolean) => {
+    if (!name?.trim()) throw new Error('技能名不能为空')
+    return toggleSkillEnabled(loadConfig(), name.trim(), Boolean(enabled))
+  })
+
+  /** 组自定义套件：勾选技能统一打套件标记 */
+  handle('skills:groupPackage', (packageName: string, members: string[]) => {
+    if (!packageName?.trim()) throw new Error('套件名不能为空')
+    if (!Array.isArray(members) || members.length === 0) throw new Error('请至少选择一个技能')
+    return groupCustomPackage(loadConfig(), packageName.trim(), members)
+  })
+
+  /** 解散自定义套件 */
+  handle('skills:ungroupPackage', (packageName: string) => {
+    if (!packageName?.trim()) throw new Error('套件名不能为空')
+    return ungroupCustomPackage(loadConfig(), packageName.trim())
+  })
+
   // ---------- P6 更新检测 ----------
 
   handle('updates:checkSkills', () => checkSkillUpdates(loadConfig()))
@@ -301,12 +385,14 @@ export function registerIpc(): void {
 
   // ---------- P7 设置 / 主题 / 导入导出 ----------
 
-  /** 通用配置更新（ui / net / backup / sharedRoot 等浅合并字段）；更新后同步 nativeTheme */
+  /** 通用配置更新（ui / net / backup / marketplaces / sharedRoot 等浅合并字段）；更新后同步 nativeTheme */
   handle('config:update', (patch: Partial<AppConfig>) => {
     const config = loadConfig()
     if (patch.ui !== undefined) config.ui = { ...config.ui, ...patch.ui }
     if (patch.net !== undefined) config.net = { ...config.net, ...patch.net }
     if (patch.backup !== undefined) config.backup = { ...config.backup, ...patch.backup }
+    if (patch.marketplaces !== undefined) config.marketplaces = patch.marketplaces
+    if (patch.search !== undefined) config.search = { ...config.search, ...patch.search }
     if (patch.sharedRoot !== undefined) {
       if (!patch.sharedRoot.trim()) throw new Error('共享库路径不能为空')
       config.sharedRoot = patch.sharedRoot.trim()

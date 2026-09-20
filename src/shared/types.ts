@@ -32,6 +32,8 @@ export interface AppConfig {
     /** 按简介搜索 */
     intro?: boolean
   }
+  /** 用户添加的套件市场来源（内置两个在代码里，不入配置） */
+  marketplaces?: MarketSource[]
 }
 
 /** 技能根的联接状态（与 PowerShell 版 verify.ps1 的状态机一一对应） */
@@ -55,6 +57,11 @@ export interface AgentPreset {
   dynamic?: boolean
   /** dynamic 为 true 时的通配路径，`*` 代表可变片段（如用户 ID） */
   glob?: string
+  /**
+   * 桌面版增强项：PowerShell 版仓库里没有这一条（只存在于桌面程序）。
+   * check:tables 的数量与逐项比对会把这类项排除，避免"防漂移"误报。
+   */
+  desktopOnly?: boolean
 }
 
 /** 一个 Agent 的实时状态 */
@@ -111,6 +118,36 @@ export interface SkillInfo {
   translatedAt?: string
   /** _meta.json 里的本地版本号（市场安装的技能常见，仅展示用） */
   version?: string
+  /** 套件归属（市场套件或本地自定义套件） */
+  package?: { marketplace: string; plugin: string; version?: string }
+  /** false = 已停用（位于 skills-disabled 区，Agent 不加载） */
+  enabled?: boolean
+}
+
+/** 技能套件市场来源（与 WorkBuddy known_marketplaces 对齐） */
+export interface MarketSource {
+  name: string
+  type: 'git' | 'zip' | 'directory'
+  url: string
+  /** true = 应用内置（不可删除） */
+  builtin?: boolean
+}
+
+/** 市场清单里的套件条目（marketplace.json plugins[] 投影） */
+export interface MarketPlugin {
+  name: string
+  description: string
+  version?: string
+  category?: string
+  /** 包含的技能目录名（安装到共享库时用） */
+  skillDirs: string[]
+}
+
+export interface MarketManifest {
+  name: string
+  description: string
+  source: MarketSource
+  plugins: MarketPlugin[]
 }
 
 /** P4 联接写操作的日志行（与 PowerShell 脚本输出同款文案，逐条展示给用户） */
@@ -277,6 +314,21 @@ export interface UpdateDownloadProgress {
 export interface SkillUpdateInfo extends SkillInfo {
   state: UpdateState
   remoteSha?: string
+}
+
+/** 路由技能写入目标：一个 Agent 的技能根（也就是它实际加载技能的位置） */
+export interface RouterTarget {
+  key: string
+  label: string
+  root: string
+  /** 技能根目录存在 */
+  exists: boolean
+  /** 是指向共享库的联接（此时该根与共享库是同一份物理文件） */
+  isSharedLink: boolean
+  /** 该根下实际可见的技能数（不含路由技能自身） */
+  skillCount: number
+  /** 来自 config.agents（用户在应用里接入过的） */
+  configured: boolean
 }
 
 /** 所有 IPC 的统一返回结构 */

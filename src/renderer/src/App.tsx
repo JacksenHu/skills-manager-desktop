@@ -375,18 +375,16 @@ export default function App() {
         <ResultModal title={result.title} logs={result.logs} onClose={() => setResult(null)} />
       )}
 
-      {/* 设置弹窗（导航栏不再单设设置页） */}
+      {/* 设置弹窗（导航栏不再单设设置页；Modal 基础组件已自带 70vh 滚动区，这里不再套一层滚动，避免双滚动条） */}
       {settingsOpen && (
         <Modal title="设置" onClose={() => setSettingsOpen(false)} width="max-w-3xl">
-          <div className="max-h-[75vh] overflow-auto pr-1">
-            <SettingsPanel
-              config={config}
-              onConfigChanged={(c) => {
-                setConfig(c)
-                void refresh()
-              }}
-            />
-          </div>
+          <SettingsPanel
+            config={config}
+            onConfigChanged={(c) => {
+              setConfig(c)
+              void refresh()
+            }}
+          />
         </Modal>
       )}
 

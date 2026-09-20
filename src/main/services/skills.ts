@@ -1,10 +1,12 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import extractZip from 'extract-zip'
-import type { AppConfig, OpResult, RepoSearchResult, SkillInfo } from '@shared/types'
+import type { AppConfig, OpResult, RepoSearchResult, RouterTarget, SkillInfo } from '@shared/types'
 import categoryDictJson from '@shared/data/category-dict.json'
 import { assertRealDir } from './junction-write'
+import { classifyJunction, loadSameSourceGroups } from './junction-state'
+import { AGENT_PRESETS, expandPath } from './detect'
 import { httpGet, httpGetJson, httpGetResponse, cjkRatio, translateDescription } from './translate'
 
 /**
@@ -14,6 +16,12 @@ import { httpGet, httpGetJson, httpGetResponse, cjkRatio, translateDescription }
  *
  * 安全约定：任何递归删除前必须过 assertRealDir（junction-write 导出的统一守卫）；
  * 删除对象只允许是共享库里的真实技能目录。
+ *
+ * 路由技能（与 PS 版的关键差异，0.3.0 修正）：
+ * PS 版把 router-guide 生成到共享库根，而共享库不是任何 Agent 的加载目录，
+ * 结果「技能库里看得见、会话里调不到」。桌面版改为：写到各 Agent 技能根
+ * （真实加载位置），并只索引该根下**实际可见**的技能；目录名与 frontmatter
+ * name 统一为 skill-router。
  */
 
 // ---------- 分类词典（三张事实表之一，check:tables 防漂移） ----------
@@ -143,37 +151,119 @@ function readIntros(dir: string): { fm: Record<string, string>; intro: string; i
   return { fm, intro, introZh }
 }
 
-/** 扫描共享库：每个含 SKILL.md 的子目录即一个技能（含 router-guide） */
+/** 停用技能存放区：与共享库同父目录（同盘 rename 原子；且在共享库外，Agent 绝对扫不到） */
+export function disabledRoot(config: AppConfig): string {
+  return join(config.sharedRoot, '..', 'skills-disabled')
+}
+
+/** 扫描共享库 + 停用区：每个含 SKILL.md 的子目录即一个技能（含 skill-router 自身） */
 export function listSkills(config: AppConfig): SkillInfo[] {
   const root = config.sharedRoot
   if (!existsSync(root)) return []
   const out: SkillInfo[] = []
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
-    if (!entry.isDirectory() || entry.isSymbolicLink()) continue
-    const dir = join(root, entry.name)
-    if (!existsSync(join(dir, 'SKILL.md'))) continue
-    const { fm, intro, introZh } = readIntros(dir)
-    const meta = readMeta(dir)
-    const manualCategory = String(meta.category ?? '').trim()
-    out.push({
-      name: entry.name,
-      // 路由技能固定归入内置分类；其次手动指定；再退回关键词自动分类
-      category:
-        entry.name === 'router-guide'
-          ? 'Agent 与技能管理'
-          : manualCategory || classifySkill(entry.name, introZh || intro, fm),
-      intro,
-      introZh,
-      source: meta.source?.toString(),
-      branch: meta.branch?.toString(),
-      commitSha: meta.commitSha?.toString(),
-      installedAt: meta.installedAt?.toString(),
-      translatedAt: meta.translatedAt?.toString(),
-      version: meta.version?.toString()
-    })
+  const scanDir = (base: string, enabled: boolean) => {
+    if (!existsSync(base)) return
+    for (const entry of readdirSync(base, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue
+      const dir = join(base, entry.name)
+      if (!existsSync(join(dir, 'SKILL.md'))) continue
+      const { fm, intro, introZh } = readIntros(dir)
+      const meta = readMeta(dir)
+      const manualCategory = String(meta.category ?? '').trim()
+      // 套件成员固定归「套件」分类；其次手动指定；再退回关键词自动分类
+      const pkgRaw = meta.package as { marketplace?: unknown; plugin?: unknown; version?: unknown } | undefined
+      const isPkg = Boolean(pkgRaw?.marketplace && pkgRaw?.plugin)
+      out.push({
+        name: entry.name,
+        category: isPkg
+          ? '套件'
+          : entry.name === ROUTER_SKILL_NAME
+            ? 'Agent 与技能管理'
+            : manualCategory || classifySkill(entry.name, introZh || intro, fm),
+        intro,
+        introZh,
+        source: meta.source?.toString(),
+        branch: meta.branch?.toString(),
+        commitSha: meta.commitSha?.toString(),
+        installedAt: meta.installedAt?.toString(),
+        translatedAt: meta.translatedAt?.toString(),
+        version: meta.version?.toString(),
+        package: isPkg
+          ? {
+              marketplace: String(pkgRaw!.marketplace),
+              plugin: String(pkgRaw!.plugin),
+              version: pkgRaw!.version ? String(pkgRaw!.version) : undefined
+            }
+          : undefined,
+        enabled
+      })
+    }
   }
+  scanDir(root, true)
+  scanDir(disabledRoot(config), false)
   out.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
   return out
+}
+
+/** 启停技能：在共享库与停用区之间移动（同盘 rename 原子；跨盘兜底复制+删除） */
+export function toggleSkillEnabled(config: AppConfig, name: string, enabled: boolean): OpResult {
+  if (name.includes('/') || name.includes('\\') || name.includes('..')) {
+    throw new Error(`非法技能名: ${name}`)
+  }
+  const from = join(enabled ? disabledRoot(config) : config.sharedRoot, name)
+  const to = join(enabled ? config.sharedRoot : disabledRoot(config), name)
+  if (!existsSync(from)) throw new Error(`${enabled ? '停用区' : '共享库'}中找不到技能: ${name}`)
+  if (existsSync(to)) throw new Error(`目标已存在同名技能: ${name}`)
+  mkdirSync(dirname(to), { recursive: true })
+  try {
+    renameSync(from, to)
+  } catch {
+    // 跨盘 rename 失败兜底：复制 + 删除
+    cpSync(from, to, { recursive: true })
+    rmSync(from, { recursive: true, force: true })
+  }
+  return {
+    logs: [
+      enabled
+        ? `[OK] ${name} 已启用（回到共享库，Agent 可加载）`
+        : `[OK] ${name} 已停用（移出共享库，Agent 不再加载；数据保留在 skills-disabled）`
+    ]
+  }
+}
+
+/** 组套件：成员技能统一打 package 标记（marketplace='custom'） */
+export function groupCustomPackage(config: AppConfig, packageName: string, members: string[]): OpResult {
+  const pkg = packageName.trim()
+  if (!pkg) throw new Error('套件名不能为空')
+  if (members.length === 0) throw new Error('请至少选择一个技能')
+  const logs: string[] = []
+  for (const m of members) {
+    const dir = skillDirOrThrow(config, m)
+    writeMeta(dir, { package: { marketplace: 'custom', plugin: pkg } })
+    logs.push(`[OK] ${m} → 套件「${pkg}」`)
+  }
+  logs.unshift(`[OK] 已把 ${members.length} 个技能组成自定义套件「${pkg}」`)
+  return { logs }
+}
+
+/** 解散自定义套件：清除成员的 package 标记（仅 custom 套件可解散） */
+export function ungroupCustomPackage(config: AppConfig, packageName: string): OpResult {
+  const pkg = packageName.trim()
+  const logs: string[] = []
+  let count = 0
+  for (const s of listSkills(config)) {
+    if (s.package?.plugin === pkg && s.package.marketplace === 'custom') {
+      const dir = join(s.enabled === false ? disabledRoot(config) : config.sharedRoot, s.name)
+      const meta = readMeta(dir)
+      delete meta.package
+      writeFileSync(join(dir, '_meta.json'), JSON.stringify(meta, null, 2), 'utf8')
+      logs.push(`[OK] ${s.name} 已退出套件「${pkg}」`)
+      count++
+    }
+  }
+  if (count === 0) throw new Error(`自定义套件「${pkg}」不存在或没有成员`)
+  logs.unshift(`[OK] 已解散自定义套件「${pkg}」（${count} 个成员）`)
+  return { logs }
 }
 
 // ---------- 安装 ----------
@@ -488,95 +578,265 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
 
-// ---------- 生成路由技能 ----------
+// ---------- 生成路由技能（技能套件总入口） ----------
+
+/** 路由技能目录名 = frontmatter name（避免"目录名 vs 注册名"对不上导致点名无效） */
+export const ROUTER_SKILL_NAME = 'skill-router'
+/** 旧版遗留目录名：生成在共享库根，任何 Agent 都加载不到（死技能），生成时自动清理 */
+export const LEGACY_ROUTER_DIR = 'router-guide'
 
 export interface RouterItem {
+  /** 调用名（frontmatter name，即 Agent 里点名用的名字） */
   name: string
+  /** 技能目录名，与调用名不同时在清单里标注 */
+  dir?: string
   intro: string
   category: string
 }
 
-/** 纯函数：按 9 大分类 + 未分类组织索引（generate-router-skill.ps1 同款文案结构） */
-export function buildRouterMarkdown(items: RouterItem[], sharedRoot: string): string {
+/** 一个路由写入目标（类型定义在 @shared/types，供 IPC / 渲染层共用） */
+
+/** 技能根下实际可见的一个技能（比 SkillInfo 多记一个目录名） */
+export interface VisibleSkill extends SkillInfo {
+  dir: string
+}
+
+/** 取某个入口的技能根路径：已配置优先，其次静态预设展开 */
+function agentRootOf(config: AppConfig, key: string): string | undefined {
+  const configured = config.agents[key]
+  if (configured) return configured
+  const preset = AGENT_PRESETS.find((p) => p.key === key)
+  if (!preset || preset.dynamic) return undefined
+  return expandPath(preset.path)
+}
+
+/**
+ * 扫描一个技能根下**实际可见**的技能（只读）。
+ *
+ * 与 listSkills 的关键差别：不跳过联接——Agent 技能根常常本身就是指向共享库的
+ * junction，或根下是一堆指向共享库的技能级 junction；这里要的正是"那个 Agent
+ * 真的能看到什么"。name 取 frontmatter 的 name（点名用），同时记下目录名。
+ */
+export function listVisibleSkills(root: string): VisibleSkill[] {
+  if (!existsSync(root)) return []
+  const out: VisibleSkill[] = []
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (entry.name === ROUTER_SKILL_NAME || entry.name === LEGACY_ROUTER_DIR) continue
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue
+    const dir = join(root, entry.name)
+    if (!existsSync(join(dir, 'SKILL.md'))) continue
+    const { fm, intro, introZh } = readIntros(dir)
+    const meta = readMeta(dir)
+    const manualCategory = String(meta.category ?? '').trim()
+    out.push({
+      name: (fm['name'] ?? '').trim() || entry.name,
+      dir: entry.name,
+      category: manualCategory || classifySkill(entry.name, introZh || intro, fm),
+      intro,
+      introZh,
+      source: meta.source?.toString(),
+      branch: meta.branch?.toString(),
+      commitSha: meta.commitSha?.toString(),
+      installedAt: meta.installedAt?.toString(),
+      translatedAt: meta.translatedAt?.toString(),
+      version: meta.version?.toString()
+    })
+  }
+  out.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+  return out
+}
+
+/**
+ * 解析路由写入目标（只读）。
+ *
+ * 缺省 = 自动检测：已接入配置的 Agent + 静态预设里技能根存在的 Agent
+ * （后者覆盖"装了但没在应用里接入"的软件，比如本机的 WorkBuddy）。
+ * 显式传 keys 时只取这些入口（可以是未接入的预设）。
+ */
+export function resolveRouterTargets(config: AppConfig, keys?: string[]): RouterTarget[] {
+  const groups = loadSameSourceGroups()
+  const out = new Map<string, RouterTarget>()
+
+  const consider = (key: string, label: string, configured: boolean): void => {
+    const root = agentRootOf(config, key)
+    if (!root) return
+    const dedupe = root.toLowerCase()
+    if (out.has(dedupe)) return
+    const exists = existsSync(root)
+    const verdict = exists ? classifyJunction(root, config.sharedRoot, groups).verdict : null
+    out.set(dedupe, {
+      key,
+      label,
+      root,
+      exists,
+      isSharedLink: verdict === 'ok',
+      skillCount: exists ? listVisibleSkills(root).length : 0,
+      configured
+    })
+  }
+
+  if (keys && keys.length > 0) {
+    for (const k of keys) {
+      const preset = AGENT_PRESETS.find((p) => p.key === k)
+      consider(k, preset?.label ?? k, Boolean(config.agents[k]))
+    }
+    return [...out.values()]
+  }
+
+  // 1) 用户在应用里接入过的 Agent
+  for (const k of Object.keys(config.agents)) {
+    const preset = AGENT_PRESETS.find((p) => p.key === k)
+    consider(k, preset?.label ?? k, true)
+  }
+  // 2) 自动检测：静态预设里技能根已存在的入口
+  for (const p of AGENT_PRESETS) {
+    if (p.dynamic) continue
+    consider(p.key, p.label, false)
+  }
+  return [...out.values()]
+}
+
+/** 清理旧版生成在共享库根的 router-guide（无法被任何 Agent 加载，纯垃圾） */
+function cleanupLegacyRouter(sharedRoot: string): string[] {
+  const legacy = join(sharedRoot, LEGACY_ROUTER_DIR)
+  if (!existsSync(legacy)) return []
+  try {
+    assertRealDir(legacy) // 联接一律拒绝：防 rmSync 穿透到共享库
+    const names = readdirSync(legacy)
+    const onlyOwn =
+      names.length > 0 && names.every((n) => n === 'SKILL.md' || n === '_meta.json')
+    const head = onlyOwn
+      ? readFileSync(join(legacy, 'SKILL.md'), 'utf8').replace(/^\uFEFF/, '').slice(0, 160)
+      : ''
+    if (onlyOwn && head.includes(`name: ${ROUTER_SKILL_NAME}`)) {
+      rmSync(legacy, { recursive: true, force: true })
+      return [`[清理] 已删除旧版死技能（生成在共享库根、任何 Agent 都加载不到）: ${legacy}`]
+    }
+    return [`[提示] ${legacy} 内容不像本工具生成的路由技能，未自动删除，可在技能库中手动移除`]
+  } catch (e) {
+    return [`[提示] 旧路由目录未清理：${e instanceof Error ? e.message : String(e)}`]
+  }
+}
+
+/** 纯函数：按 9 大分类 + 自定义分类组织套件清单（技能套件总入口文案） */
+export function buildRouterMarkdown(items: RouterItem[], root: string, targetLabel?: string): string {
   const lines: string[] = []
   lines.push('---')
-  lines.push('name: skill-router')
+  lines.push(`name: ${ROUTER_SKILL_NAME}`)
   lines.push(
-    'description: 共享技能库的总路由。当用户提出任何任务、问题或寻求帮助时（无论任务大小、是否明确提到技能），先阅读本文件的分类索引，从共享技能库中选出最匹配的 1~3 个技能并说明理由，然后按该技能自己的 SKILL.md 执行；用户直接点名技能名时，说明它的用途、适用场景与触发方式。所有条目按分类组织，未分类技能同样可用。'
+    `description: 技能套件总入口（${items.length} 个技能）。用户点名本技能并描述想做的事时，读下方清单按描述匹配最合适的 1~3 个技能，说明推荐理由后立即读取该技能自己的 SKILL.md 并执行；用户直接问某个技能是什么、什么时候用、怎么触发时，也由本文件回答。`
   )
   lines.push('---')
   lines.push('')
-  lines.push('# 统一技能路由')
+  lines.push('# 技能套件路由')
   lines.push('')
-  lines.push(`你是共享技能库的路由器，技能库根目录：${sharedRoot}`)
+  lines.push('整个技能库被当作**一个套件**使用，本文件是它的唯一入口与索引。')
   lines.push('')
-  lines.push('## 使用方式')
+  lines.push(`- 套件规模：**${items.length}** 个技能`)
+  lines.push(`- 技能根目录：\`${root}\`${targetLabel ? `（${targetLabel}）` : ''}`)
   lines.push('')
-  lines.push('- 用户提出任何任务、问题或寻求帮助时（无论任务大小、是否明确提到技能），先在本文件的分类索引里匹配情境，推荐最合适的 1~3 个技能并说明理由；')
-  lines.push('- 或用户直接说技能名，告知它是什么、什么时候用、怎么触发；')
-  lines.push('- 本技能只做**索引与推荐**：确定技能后，按该技能自己的 SKILL.md 使用。')
+  lines.push('## 工作方式（写给 Agent）')
   lines.push('')
-  lines.push('## 触发时机（写给 Agent）')
+  lines.push('1. 用户在会话里点名 `skill-router` 并描述需求 → 先在下面的清单里按需求匹配，不要凭空发挥；')
+  lines.push('2. 命中 1~3 个：逐个说明为什么合适，然后**立即**读取该技能的 SKILL.md 并按它执行（按贴合度排序；需要串联时按顺序做）；')
+  lines.push('3. 只有一个明显命中：直接执行，不必罗列其他候选；')
+  lines.push('4. 一个都没有：明确告诉用户「套件里没有匹配的技能」，再按常规方式处理，不要硬套；')
+  lines.push('5. 用户直接问某个技能是什么 / 什么时候用 / 怎么触发：照本文件回答，必要时读它的 SKILL.md；')
+  lines.push('6. 简介以中文为准（没有中文时看英文原文）。')
   lines.push('')
-  lines.push('- 只要是"要动手做一件事 / 回答一个专业问题 / 生成一份内容"的请求，就应先查阅本索引再行动；')
-  lines.push('- 索引里没有匹配项时，按常规方式处理，不必提及本技能；')
-  lines.push('- 简介以中文为准（无中文时看英文原文）。')
+  lines.push('## 触发时机')
   lines.push('')
-  lines.push('## 路由步骤')
+  lines.push('- 只要用户的目标是"做一件事 / 回答一个专业问题 / 生成一份内容"，就先查本清单再动手；')
+  lines.push('- 清单里没有匹配项时，按常规方式处理，不必提及本技能。')
   lines.push('')
-  lines.push('1. 判断情境属于哪个大类（开发 / 写作 / 研究 / 办公 / 数据 / 设计 / 音视频 / Agent 管理 / 生活）；')
-  lines.push('2. 在该分类条目中按名称与简介匹配任务关键词；')
-  lines.push('3. 命中多个时，按描述贴合度排序，最多推荐 3 个。')
-  lines.push('')
-  lines.push(`## 分类索引（共 ${items.length} 个技能 · 9 大分类 + 未分类）`)
+  lines.push(`## 技能清单（${items.length} 个）`)
   lines.push('')
 
-  for (const cn of CATEGORY_ORDER) {
-    const group = items.filter((i) => i.category === cn)
-    if (group.length === 0) continue
-    lines.push(`### ${cn}（${group.length}）`)
+  const emitGroup = (title: string, group: RouterItem[]): void => {
+    if (group.length === 0) return
+    lines.push(`### ${title}（${group.length}）`)
     lines.push('')
     for (const g of group) {
-      lines.push(g.intro ? `- **${g.name}**：${g.intro}` : `- **${g.name}**`)
+      const dirNote = g.dir && g.dir !== g.name ? `（目录 ${g.dir}）` : ''
+      lines.push(g.intro ? `- **${g.name}**${dirNote}：${g.intro}` : `- **${g.name}**${dirNote}`)
     }
     lines.push('')
   }
+
+  for (const cn of CATEGORY_ORDER) emitGroup(cn, items.filter((i) => i.category === cn))
+  // 自定义分类（不在词典 displayOrder 里的）兜底展示，不能漏
+  const known = new Set<string>(CATEGORY_ORDER)
+  const extras = [...new Set(items.filter((i) => !known.has(i.category)).map((i) => i.category))].sort()
+  for (const cn of extras) emitGroup(cn, items.filter((i) => i.category === cn))
+
   return lines.join('\n')
 }
 
-/** 生成 / 刷新 router-guide/SKILL.md（UTF-8 BOM，PS WriteAllText 同款） */
-export async function generateRouter(config: AppConfig): Promise<OpResult> {
-  const root = config.sharedRoot
-  if (!existsSync(root)) throw new Error(`共享库不存在: ${root}`)
+export interface RouterGenOptions {
+  /** 只写这些入口（key）；缺省 = 自动检测（已接入 + 预设里可用的技能根） */
+  targetKeys?: string[]
+}
 
-  const items: RouterItem[] = []
-  let uncategorized = 0
-  for (const info of listSkills(config)) {
-    if (info.name === 'router-guide') continue // 路由技能自身不入索引（PS 同款排除）
-    const intro = info.introZh || info.intro
-    if (info.category === UNCATEGORIZED) uncategorized++
-    items.push({ name: info.name, intro, category: info.category })
+/**
+ * 生成 / 刷新技能套件路由技能（skill-router）。
+ *
+ * 与 PS 版的核心差异：写到**各 Agent 的技能根**（真实加载位置），而不是共享库根；
+ * 清单只收录该根下实际可见的技能，所以照单点名一定能调到。
+ */
+export async function generateRouter(config: AppConfig, opts?: RouterGenOptions): Promise<OpResult> {
+  const sharedRoot = config.sharedRoot
+  if (!existsSync(sharedRoot)) throw new Error(`共享库不存在: ${sharedRoot}`)
+
+  const logs: string[] = []
+  // 1) 先清掉 PS 版遗留的死技能（生成在共享库根，任何 Agent 都加载不到）
+  logs.push(...cleanupLegacyRouter(sharedRoot))
+
+  // 2) 解析目标：目录存在且能扫到技能的技能根
+  const all = resolveRouterTargets(config, opts?.targetKeys)
+  const usable = all.filter((t) => t.exists && t.skillCount > 0)
+  const skipped = all.filter((t) => !t.exists || t.skillCount === 0)
+  if (usable.length === 0) {
+    throw new Error(
+      '没有可写入的技能根：请先在「联接」页接入至少一个 Agent，或确认 Agent 技能目录里已经有技能'
+    )
   }
-  items.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
 
-  const outDir = join(root, 'router-guide')
-  if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
-  // PS 用 UTF8 BOM 写出，保持一致（部分 Windows 工具链读无 BOM 的 UTF-8 会乱码）
-  writeFileSync(join(outDir, 'SKILL.md'), '\uFEFF' + buildRouterMarkdown(items, root), 'utf8')
-  // 路由技能固定分类（_meta.json 落盘，列表/过滤稳定归属）
-  writeMeta(outDir, { name: 'skill-router', category: 'Agent 与技能管理' })
+  // 3) 逐根写盘（清单按各自根下"实际可见"的技能生成）
+  let totalItems = 0
+  for (const t of usable) {
+    const items: RouterItem[] = listVisibleSkills(t.root)
+      .map((s) => ({
+        name: s.name,
+        dir: s.dir,
+        intro: s.introZh || s.intro,
+        category: s.category
+      }))
+      .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
 
-  return {
-    logs: [
-      `[OK] 已生成总路由技能: ${join(outDir, 'SKILL.md')}`,
-      `     技能总数: ${items.length} · 未分类: ${uncategorized}`,
-      '',
-      '⚠ 使用提醒：路由技能不会在 Agent 会话里自动触发。',
-      '  请在各 Agent 的新会话中手动选择 / 点名 skill-router 启用，',
-      '  之后它会按本索引为你的任务推荐合适的技能。',
-      '  每次新增/移除技能后，重新生成本技能刷新索引。'
-    ]
+    const outDir = join(t.root, ROUTER_SKILL_NAME)
+    mkdirSync(outDir, { recursive: true })
+    writeFileSync(join(outDir, 'SKILL.md'), buildRouterMarkdown(items, t.root, t.label), 'utf8')
+    // 固定分类落盘：技能库列表 / 分类过滤里归属稳定（仅对共享库内的可见副本有意义）
+    writeMeta(outDir, { name: ROUTER_SKILL_NAME, category: 'Agent 与技能管理' })
+
+    totalItems += items.length
+    logs.push(
+      `[OK] ${t.label} → ${join(outDir, 'SKILL.md')}（收录 ${items.length} 个技能${t.isSharedLink ? ' · 共享库联接' : ''}）`
+    )
   }
+
+  if (skipped.length > 0) {
+    logs.push(
+      `[跳过] ${skipped.length} 个入口不可用（目录不存在或没有技能）：${skipped.map((s) => s.key).join('、')}`
+    )
+  }
+  logs.push('')
+  logs.push(`已写入 ${usable.length} 个技能根，清单合计 ${totalItems} 条。`)
+  logs.push('⚠ 路由技能不会自动触发：请在该 Agent 的**新会话**里点名 skill-router 并描述需求，')
+  logs.push('  它会按清单匹配技能、说明理由，然后直接按那个技能执行。')
+  logs.push('  技能安装 / 移除 / 翻译之后，重新点「生成路由」即可刷新清单。')
+
+  return { logs }
 }
 
 // ---------- 分类管理（手动指定 / 自定义分类 / 重命名） ----------

@@ -33,7 +33,7 @@ npm run verify:all # 全量回归：事实表 + P3 对齐 + P4/P5/P6 冒烟
 
 | 数据                   | 落点                                        | PowerShell 源                                                 |
 | -------------------- | ----------------------------------------- | ------------------------------------------------------------ |
-| 24 项 Agent 路径预设      | `src/shared/data/agent-presets.json`      | `scripts/setup-wizard.ps1:702-724`（+Marvis 动态）               |
+| Agent 路径预设（23 对齐 + 1 桌面增强 + Marvis 动态） | `src/shared/data/agent-presets.json`      | `scripts/setup-wizard.ps1:702-724`；`workbuddy-ai`（`.workbuddy-ai\skills`）为桌面版增强项，标 `desktopOnly` 不参与对齐 |
 | 9 大分类关键词词典（131 个关键词） | `src/shared/data/category-dict.json`      | `setup-wizard.ps1:410-420`、`generate-router-skill.ps1:74-84` |
 | 8 个同源多根组（23 条模式）     | `src/shared/data/same-source-groups.json` | `scripts/lib/duplicate-guard.ps1:14-23`                      |
 
@@ -55,6 +55,8 @@ PowerShell 源码路径可用 `SKILLS_PS_ROOT` 环境变量覆盖。
 - 会改本机环境的操作（建/拆联接、归并、安装/移除技能、写 `_meta.json`）在 UI 上二次确认；接入前先出预案（迁移清单 / 内容冲突 / 同源多根警告）
 - 只读操作（探测状态、扫描技能、检测更新）随便点
 - 不碰各 Agent 的平台内置技能目录（如豆包 `.skills` 系统根）
+- 「生成路由」会往每个选中 Agent 的技能根写 `skill-router/SKILL.md`（+ `_meta.json`），这是**唯一会写进 Agent 技能目录**的操作；UI 里可逐个勾选目标
+- 共享库根里 PS 版遗留的 `router-guide`（任何 Agent 都加载不到的死技能）在生成路由时自动清理，只删「内容确实是自己生成的那个」目录，且必须过 `assertRealDir`
 
 ## 进度
 
@@ -62,7 +64,7 @@ PowerShell 源码路径可用 `SKILLS_PS_ROOT` 环境变量覆盖。
 - [x] P2 三张事实表（24 项 Agent 预设 / 9 大分类词典 / 8 个同源组）落 JSON + 防漂移校验
 - [x] P3 联接只读：24 项探测 + 状态机完整对齐
 - [x] P4 联接写：建（含内容迁移 + SHA256 去重）/ 拆 / 归并（verify:p4 沙箱 24 项断言全过）
-- [x] P5 技能库：列表 / 分类 / 安装（GitHub / owner/repo / skills.sh）/ 移除 / 翻译简介（腾讯 TranSmart → MyMemory → Google gtx）/ 生成路由（verify:p5 离线 27 项断言 + 真机网络安装与翻译验证通过）
+- [x] P5 技能库：列表 / 分类 / 安装（GitHub / owner/repo / skills.sh）/ 移除 / 翻译简介（腾讯 TranSmart → MyMemory → Google gtx）/ 生成路由（写到各 Agent 的真实技能根，清单按该根实际可见技能生成；verify:p5 离线 40 项断言 + 真机网络安装与翻译验证通过）
 - [x] P6 更新检测：技能来源仓库六态判定 + 一键升级（重新安装 -Replace）+ 工具自身版本自检（verify:p6 离线 17 项 + 真机 API 验证：update/latest/gone/自检全过）
 - [x] P7 设置 / 主题 / 托盘 / 导入导出：设置页（共享库路径 / Agent 配置管理 / 主题三态 / 关闭行为 / GitHub Token / 翻译邮箱 / TLS 开关 / 导入导出 / 关于）、关闭最小化到托盘、主题持久化跟随系统（nativeTheme 同步渲染进程）
 - [x] P8 打包分发：electron-builder NSIS（`npm run dist`），产物 `release/SkillsManager Setup <版本>.exe`（约 108 MB，x64）+ `release/win-unpacked/` 免安装目录；应用图标 / 托盘图标为脚本生成的自绘 PNG/ICO（链环构图）

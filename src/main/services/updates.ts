@@ -86,9 +86,9 @@ export function groupByRepo(skills: SkillInfo[]): {
   return { repos: order.map((k) => map.get(k)!), noSource }
 }
 
-/** 技能更新检测（GitHub 每仓库 1 次 API；SkillHub 来源逐技能走平台详情接口） */
+/** 技能更新检测（GitHub 每仓库 1 次 API；SkillHub 来源逐技能走平台详情接口；停用技能跳过） */
 export async function checkSkillUpdates(config: AppConfig): Promise<CheckUpdatesResult> {
-  const skills = listSkills(config)
+  const skills = listSkills(config).filter((s) => s.enabled !== false)
   const { repos, noSource } = groupByRepo(skills)
 
   // SkillHub 来源的技能单独检测（meta.version 对比平台最新 version）

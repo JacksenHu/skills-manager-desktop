@@ -26,7 +26,8 @@ const api = {
     remove: (name: string) => ipcRenderer.invoke('skills:remove', name),
     translate: (name?: string, force?: boolean) =>
       ipcRenderer.invoke('skills:translate', name, force),
-    generateRouter: () => ipcRenderer.invoke('skills:router'),
+    generateRouter: (targetKeys?: string[]) => ipcRenderer.invoke('skills:router', targetKeys),
+    routerTargets: () => ipcRenderer.invoke('skills:routerTargets'),
     setCategory: (name: string, category: string) =>
       ipcRenderer.invoke('skills:setCategory', name, category),
     customCategories: () => ipcRenderer.invoke('skills:customCategories'),
@@ -35,7 +36,20 @@ const api = {
     setSource: (name: string, url: string) => ipcRenderer.invoke('skills:setSource', name, url),
     searchRepos: (keyword: string) => ipcRenderer.invoke('skills:searchRepos', keyword),
     autoSource: (name: string) => ipcRenderer.invoke('skills:autoSource', name),
-    autoSourceAll: () => ipcRenderer.invoke('skills:autoSourceAll')
+    autoSourceAll: () => ipcRenderer.invoke('skills:autoSourceAll'),
+    toggle: (name: string, enabled: boolean) => ipcRenderer.invoke('skills:toggle', name, enabled),
+    groupPackage: (packageName: string, members: string[]) =>
+      ipcRenderer.invoke('skills:groupPackage', packageName, members),
+    ungroupPackage: (packageName: string) => ipcRenderer.invoke('skills:ungroupPackage', packageName)
+  },
+  market: {
+    sources: () => ipcRenderer.invoke('market:sources'),
+    addSource: (source: { name: string; type: 'git' | 'zip' | 'directory'; url: string }) =>
+      ipcRenderer.invoke('market:addSource', source),
+    removeSource: (name: string) => ipcRenderer.invoke('market:removeSource', name),
+    list: (name: string) => ipcRenderer.invoke('market:list', name),
+    install: (marketName: string, pluginName: string) =>
+      ipcRenderer.invoke('market:install', marketName, pluginName)
   },
   hub: {
     bootstrap: () => ipcRenderer.invoke('hub:bootstrap'),

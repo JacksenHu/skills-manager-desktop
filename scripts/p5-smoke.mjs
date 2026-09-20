@@ -36,6 +36,8 @@ const {
   listSkills,
   buildRouterMarkdown,
   generateRouter,
+  resolveRouterTargets,
+  listVisibleSkills,
   removeSkill,
   translateIntros
 } = mod
@@ -140,21 +142,39 @@ check('不存在的技能报错', threwRemove)
 const resRemove = removeSkill(cfg, 'mystery-box')
 check('移除真实技能成功', resRemove.logs.some((l) => l.includes('[OK]')) && !existsSync(join(sharedRoot, 'mystery-box')))
 
-// 路由生成
-const resRouter = await generateRouter(cfg)
+// 路由生成：写到目标 Agent 的真实技能根（不再写共享库根）
+// 注意：必须显式传 targetKeys —— 缺省会「自动检测」真机上所有存在的技能根并写盘。
+const agentRoot = join(sandbox, 'agent-skills')
+mkdirSync(agentRoot, { recursive: true })
+mkSkill(agentRoot, 'code-reviewer', 'Review code and suggest improvements for python projects')
+mkSkill(agentRoot, 'xiaohongshu-writer', '写小红书爆款笔记', { descriptionZh: '写小红书爆款笔记' })
+const cfg2 = { ...cfg, agents: { 'sandbox-agent': agentRoot } }
+
+// 旧版遗留：共享库根下的 router-guide（死技能），生成时应自动清掉
+mkdirSync(join(sharedRoot, 'router-guide'), { recursive: true })
+writeFileSync(join(sharedRoot, 'router-guide', 'SKILL.md'), '---\nname: skill-router\n---\n')
+
+const resRouter = await generateRouter(cfg2, { targetKeys: ['sandbox-agent'] })
 check('路由生成 [OK]', resRouter.logs.some((l) => l.includes('[OK]')))
-const routerPath = join(sharedRoot, 'router-guide', 'SKILL.md')
-check('router-guide/SKILL.md 存在', existsSync(routerPath))
-const routerRaw = readFileSync(routerPath, 'utf8')
-check('UTF-8 BOM 开头', routerRaw.charCodeAt(0) === 0xfeff)
-const routerMd = routerRaw.replace(/^\uFEFF/, '')
+check('旧 router-guide 自动清理', !existsSync(join(sharedRoot, 'router-guide')))
+const routerPath = join(agentRoot, 'skill-router', 'SKILL.md')
+check('写进目标技能根而非共享库根', existsSync(routerPath) && !existsSync(join(sharedRoot, 'skill-router')))
+const routerMd = readFileSync(routerPath, 'utf8')
 check('frontmatter name: skill-router', routerMd.startsWith('---\nname: skill-router\n'))
-check('收录剩余 2 技能 + 路由自身排除', routerMd.includes('共 2 个技能') && !routerMd.includes('router-guide'), '')
+check('UTF-8 无 BOM', routerMd.charCodeAt(0) !== 0xfeff)
+check('清单收录 2 个技能', routerMd.includes('## 技能清单（2 个）') && routerMd.includes('套件规模：**2**'), '')
+check('清单不含路由技能自身', !routerMd.includes('**skill-router**'))
 check('分类分组标题出现', routerMd.includes('### 开发与工程（1）') && routerMd.includes('### 写作与内容（1）'))
 check('中文简介优先展示', routerMd.includes('**xiaohongshu-writer**：写小红书爆款笔记'))
-// 纯函数一致性：buildRouterMarkdown 输出与文件内容一致
-const items = listSkills(cfg).filter((s) => s.name !== 'router-guide').map((s) => ({ name: s.name, intro: s.introZh || s.intro, category: s.category }))
-check('buildRouterMarkdown 与文件一致', buildRouterMarkdown(items, sharedRoot) === routerMd)
+check('_meta.json 落盘固定分类', readFileSync(join(agentRoot, 'skill-router', '_meta.json'), 'utf8').includes('Agent 与技能管理'))
+
+// 目标解析：只认「目录存在且能扫到技能」的入口，不存在的入口不参与
+const targets = resolveRouterTargets(cfg2, ['sandbox-agent', 'no-such-agent'])
+check('已接入入口可用', targets.some((t) => t.key === 'sandbox-agent' && t.exists && t.skillCount === 2), JSON.stringify(targets))
+check('未知入口被忽略（不写盘误伤）', !targets.some((t) => t.key === 'no-such-agent'))
+const tMissing = resolveRouterTargets(cfg2, ['cline'])
+check('预设入口目录不存在 → 标记不可用', tMissing.length === 1 && !tMissing[0].exists && tMissing[0].skillCount === 0)
+check('可见技能清单跟随根扫描', listVisibleSkills(agentRoot).length === 2)
 
 // 翻译跳过逻辑（离线：全部技能均有中文简介 → 不应发请求、0 写入）
 const resTr = await translateIntros(cfg, {})

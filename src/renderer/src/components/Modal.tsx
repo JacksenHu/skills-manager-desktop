@@ -1,5 +1,6 @@
 import { AlertTriangle, X } from 'lucide-react'
 import type { ReactNode } from 'react'
+import type { RouterTarget } from '@shared/types'
 
 /** 基础弹窗：遮罩 + 居中面板，点遮罩关闭 */
 export function Modal({
@@ -279,5 +280,119 @@ export function MergeConfirm({
         只处理「活跃」根；已归并/缺失/指向他处的根不动。
       </div>
     </ConfirmDialog>
+  )
+}
+
+/**
+ * 生成套件路由技能：选目标 Agent 技能根。
+ * 只往选中的技能根写 skill-router（清单按该根实际可见技能生成）。
+ */
+export function RouterConfirm({
+  targets,
+  selected,
+  onToggle,
+  onSelectAll,
+  busy,
+  onConfirm,
+  onClose
+}: {
+  targets: RouterTarget[]
+  selected: Set<string>
+  onToggle: (key: string) => void
+  onSelectAll: (selectAll: boolean) => void
+  busy?: boolean
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  const usableCount = targets.filter((t) => t.exists && t.skillCount > 0).length
+  const pickedCount = targets.filter((t) => selected.has(t.key) && t.exists && t.skillCount > 0).length
+
+  return (
+    <Modal title="生成套件路由技能（skill-router）" onClose={onClose} width="max-w-2xl">
+      <div className="space-y-3 text-sm">
+        <div className="rounded-lg bg-sky-500/10 px-3 py-2 text-xs leading-relaxed text-sky-600 dark:text-sky-400">
+          路由技能会写到选中的 <b>Agent 技能根</b>——也就是该 Agent 真正加载技能的位置。
+          清单只收录该根下**实际可见**的技能，所以在会话里点名 <b>skill-router</b> 一定能调到。
+        </div>
+
+        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+          <span>
+            共 {targets.length} 个入口 · 可用 {usableCount} 个 · 已选 {pickedCount} 个
+          </span>
+          <button
+            onClick={() => onSelectAll(pickedCount !== usableCount)}
+            className="text-sky-500 hover:underline"
+          >
+            {pickedCount === usableCount ? '全不选' : '全选可用'}
+          </button>
+        </div>
+
+        <div className="max-h-72 space-y-1 overflow-auto pr-1">
+          {targets.map((t) => {
+            const usable = t.exists && t.skillCount > 0
+            return (
+              <label
+                key={t.key}
+                className={
+                  'flex items-center gap-2.5 rounded-lg border p-2.5 transition ' +
+                  (usable
+                    ? 'cursor-pointer border-slate-200 hover:border-slate-300 dark:border-slate-700'
+                    : 'cursor-not-allowed border-slate-200 opacity-50 dark:border-slate-700')
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(t.key) && usable}
+                  disabled={!usable}
+                  onChange={() => onToggle(t.key)}
+                  className="accent-sky-500"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-sm">{t.label}</span>
+                    {t.configured && (
+                      <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-500">
+                        已接入
+                      </span>
+                    )}
+                    {t.isSharedLink && (
+                      <span className="shrink-0 rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] text-sky-500">
+                        共享库联接
+                      </span>
+                    )}
+                  </div>
+                  <div className="truncate font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                    {t.root}
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {usable ? `可见 ${t.skillCount} 个技能` : t.exists ? '目录里没有技能' : '目录不存在'}
+                  </div>
+                </div>
+              </label>
+            )
+          })}
+        </div>
+
+        <div className="text-xs text-slate-500 dark:text-slate-400">
+          生成后：在该 Agent 的**新会话**里点名 skill-router 并描述需求，它会按清单匹配技能。
+        </div>
+      </div>
+
+      <div className="mt-5 flex justify-end gap-2">
+        <button
+          onClick={onClose}
+          className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+        >
+          取消
+        </button>
+        <button
+          onClick={onConfirm}
+          disabled={busy || pickedCount === 0}
+          className="rounded-lg bg-sky-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-sky-600 disabled:opacity-50"
+        >
+          {busy ? '生成中…' : `生成到 ${pickedCount} 个技能根`}
+        </button>
+      </div>
+    </Modal>
   )
 }

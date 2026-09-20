@@ -1,8 +1,9 @@
 /**
  * 防漂移校验：反向解析 PowerShell 版源码里的三张"事实表"，与 src/shared/data/*.json 逐项比对。
  *
- * 背景：桌面程序在 Node 侧重新实现了逻辑，24 项预设 / 9 大分类 / 8 个同源组这些"事实"
+ * 背景：桌面程序在 Node 侧重新实现了逻辑，Agent 预设 / 9 大分类 / 8 个同源组这些"事实"
  * 会被复制到两个地方。谁先改了另一边没跟上，行为就会悄悄分叉。本脚本把这件事变成一次命令。
+ * 例外：标了 desktopOnly 的预设项只存在于桌面版（PS 仓库没有），只做数量登记，不参与逐项比对。
  *
  * 用法：
  *   npm run check:tables
@@ -76,7 +77,7 @@ function readPs(relPath) {
 
 // ---------------------------------------------------------------- 1. Agent 预设
 function checkPresets() {
-  console.log('\n[1/3] 24 项 Agent 路径预设')
+  console.log('\n[1/3] Agent 路径预设（23 对齐 + 1 桌面增强 + 1 动态）')
   const src = readPs(join('scripts', 'setup-wizard.ps1'))
   const block = extractArrayBlock(src, '$detectors = ')
   const re =
@@ -97,21 +98,36 @@ function checkPresets() {
 
   const json = readJson('agent-presets.json')
   const staticJson = json.presets.filter((p) => !p.dynamic)
+  // 桌面版增强项（desktopOnly）：PowerShell 仓库里没有，只做数量登记，不参与逐项比对
+  const alignedJson = staticJson.filter((p) => !p.desktopOnly)
+  const desktopOnly = staticJson.filter((p) => p.desktopOnly)
 
   if (parsed.length !== 23) fail(`源码解析到 ${parsed.length} 项，预期 23 项静态预设`)
   else pass(`源码解析到 23 项静态预设`)
 
-  if (json.presets.length !== 24) fail(`JSON 共 ${json.presets.length} 项，预期 24（含 Marvis 动态）`)
-  else pass(`JSON 共 24 项（23 静态 + 1 动态）`)
+  const expectedTotal = 23 + desktopOnly.length + 1
+  if (json.presets.length !== expectedTotal) {
+    fail(
+      `JSON 共 ${json.presets.length} 项，预期 ${expectedTotal}（23 对齐 + ${desktopOnly.length} 桌面增强 + 1 Marvis 动态）`
+    )
+  } else {
+    pass(
+      `JSON 共 ${json.presets.length} 项（23 对齐 + ${desktopOnly.length} 桌面增强${desktopOnly.length ? `：${desktopOnly.map((p) => p.key).join('、')}` : ''} + 1 动态）`
+    )
+  }
 
-  if (parsed.length !== staticJson.length) {
-    fail(`数量对不上：源码 ${parsed.length} vs JSON 静态 ${staticJson.length}`)
+  for (const p of desktopOnly) {
+    if (!p.path || !p.probePath) fail(`[${p.key}] 桌面增强项必须写全 path / probePath`)
+  }
+
+  if (parsed.length !== alignedJson.length) {
+    fail(`数量对不上：源码 ${parsed.length} vs JSON 对齐项 ${alignedJson.length}`)
     return
   }
 
   for (let i = 0; i < parsed.length; i++) {
     const a = parsed[i]
-    const b = staticJson[i]
+    const b = alignedJson[i]
     if (a.key !== b.key) fail(`第 ${i + 1} 项 key 不同：源码 ${a.key} vs JSON ${b.key}`)
     else if (a.label !== b.label) fail(`[${a.key}] label 不同：源码 ${a.label} vs JSON ${b.label}`)
     else if (a.path !== b.path) fail(`[${a.key}] path 不同：\n      源码 ${a.path}\n      JSON ${b.path}`)
