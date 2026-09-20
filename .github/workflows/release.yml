@@ -15,6 +15,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 需要历史 tag 生成发布说明
 
       - uses: actions/setup-node@v4
         with:
@@ -59,13 +61,23 @@ jobs:
 
       # 转正 release（electron-builder 可能留在草稿态）。gh release edit 的
       # --generate-notes 组合在部分版本失败，这里直接用 REST PATCH，稳。
+      # 发布说明 = 上一个 tag 到本次的提交列表（generate_release_notes 仅对 PR 仓库效果好）
       - name: Make release public
         shell: bash
         run: |
           TAG="v$(node -p "require('./package.json').version")"
           RID=$(gh api "repos/$GH_REPO/releases" --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -1)
           if [ -z "$RID" ]; then echo "release for $TAG not found"; exit 1; fi
-          gh api -X PATCH "repos/$GH_REPO/releases/$RID" -F draft=false -F generate_release_notes=true --jq '.tag_name + " published, draft=" + (.draft|tostring)'
+          PREV_TAG=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log --pretty=format:'- %s' "$PREV_TAG..$TAG" | head -40)
+          else
+            NOTES="首次发布"
+          fi
+          gh api -X PATCH "repos/$GH_REPO/releases/$RID" \
+            -F draft=false \
+            -f body="$NOTES" \
+            --jq '.tag_name + " published, draft=" + (.draft|tostring) + ", body_lines=" + (.body | split("\n") | length | tostring)'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}

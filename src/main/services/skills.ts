@@ -565,8 +565,11 @@ export async function generateRouter(config: AppConfig): Promise<OpResult> {
     logs: [
       `[OK] 已生成总路由技能: ${join(outDir, 'SKILL.md')}`,
       `     技能总数: ${items.length} · 未分类: ${uncategorized}`,
-      '     在任何 Agent 中触发 skill-router，即可按情境路由到共享库技能。',
-      '     每次新增/移除技能后，重新生成本技能刷新索引。'
+      '',
+      '⚠ 使用提醒：路由技能不会在 Agent 会话里自动触发。',
+      '  请在各 Agent 的新会话中手动选择 / 点名 skill-router 启用，',
+      '  之后它会按本索引为你的任务推荐合适的技能。',
+      '  每次新增/移除技能后，重新生成本技能刷新索引。'
     ]
   }
 }

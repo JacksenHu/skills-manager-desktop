@@ -62,6 +62,20 @@ function httpsRequestOnce(url: string, opts: HttpOptions): Promise<RawResponse> 
   })
 }
 
+/**
+ * 网络层失败自动放宽 TLS 重试一次：
+ * 本机代理根证书不在 Node CA 库时（github.com 域典型），默认校验直接握手失败；
+ * 有 HTTP 状态码的错误（404 等）不属于此类，不重试。显式 opts.insecure 则不再重试。
+ */
+async function requestWithTlsFallback(url: string, opts: HttpOptions): Promise<RawResponse> {
+  try {
+    return await httpsRequestOnce(url, opts)
+  } catch (e) {
+    if (opts.insecure) throw e
+    return await httpsRequestOnce(url, { ...opts, insecure: true })
+  }
+}
+
 /** GET 并跟随最多 3 次重定向；返回最终 status + body（不抛非 200，调用方按需判定） */
 export async function httpGetResponse(
   url: string,
@@ -70,7 +84,7 @@ export async function httpGetResponse(
 ): Promise<{ status: number; body: Buffer }> {
   let current = url
   for (let i = 0; i <= maxRedirects; i++) {
-    const r = await httpsRequestOnce(current, opts)
+    const r = await requestWithTlsFallback(current, opts)
     if (r.status >= 300 && r.status < 400) {
       const loc = Array.isArray(r.location) ? r.location[0] : r.location
       if (loc) {
@@ -102,7 +116,7 @@ export async function httpPostJson<T>(
   opts: HttpOptions = {}
 ): Promise<T> {
   const body = JSON.stringify(payload)
-  const r = await httpsRequestOnce(url, {
+  const r = await requestWithTlsFallback(url, {
     ...opts,
     method: 'POST',
     headers: {

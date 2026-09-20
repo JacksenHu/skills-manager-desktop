@@ -1,6 +1,6 @@
 {
   "name": "skills-manager-desktop",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "跨 Agent 技能共享库的桌面管理程序：Junction 联接 / 技能库 / 更新检测 / 托盘",
   "main": "./out/main/index.js",
   "scripts": {

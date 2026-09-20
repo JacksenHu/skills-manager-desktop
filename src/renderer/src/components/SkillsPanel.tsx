@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { FolderOpen, Languages, Link2, Plus, RefreshCw, Route, Tag, Tags, Trash2 } from 'lucide-react'
+import { FolderOpen, Info, Languages, Link2, Plus, RefreshCw, Route, Tag, Tags, Trash2, X } from 'lucide-react'
 import type { IpcResult, OpResult, SkillInfo } from '@shared/types'
 import { ConfirmDialog, Modal, ResultModal } from './Modal'
 
@@ -124,6 +124,8 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
 
   const visible = filter === '全部' ? skills : skills.filter((s) => s.category === filter)
   const noSourceCount = skills.filter((s) => !s.source).length
+  const hasRouter = skills.some((s) => s.name === 'router-guide')
+  const [routerTipDismissed, setRouterTipDismissed] = useState(false)
 
   return (
     <>
@@ -211,6 +213,23 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
           <Tags className="h-3.5 w-3.5" />
         </button>
       </div>
+
+      {/* 路由技能提示条（明显提醒：需在会话中手动启用） */}
+      {hasRouter && !routerTipDismissed && (
+        <div className="mb-4 flex items-start gap-2 rounded-lg bg-sky-500/10 px-4 py-3 text-sm text-sky-600 ring-1 ring-sky-500/30 dark:text-sky-400">
+          <Info className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <b>skill-router 路由技能不会自动触发</b>
+            ：请在各 Agent 的新会话里手动选择 / 点名 skill-router 启用一次，它才会按索引为你的任务推荐技能。
+          </div>
+          <button
+            onClick={() => setRouterTipDismissed(true)}
+            className="shrink-0 rounded p-0.5 text-sky-400 hover:bg-sky-500/10"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 flex items-start justify-between gap-3 rounded-lg bg-red-500/10 px-4 py-3 text-sm text-red-400 ring-1 ring-red-500/30">
@@ -599,7 +618,18 @@ function SkillCard({
     <div className="group rounded-xl border border-slate-200 bg-white p-4 transition hover:border-sky-400/60 dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
-          <div className="truncate font-medium">{skill.name}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="truncate font-medium">{skill.name}</span>
+            {skill.name === 'router-guide' && (
+              <span
+                className="flex shrink-0 items-center gap-1 rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] text-sky-500"
+                title="路由技能：需在 Agent 会话中手动选择 / 点名 skill-router 启用"
+              >
+                <Route className="h-3 w-3" />
+                路由·需手动启用
+              </span>
+            )}
+          </div>
         </div>
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${chipCls(skill.category)}`}>
           {skill.category}
