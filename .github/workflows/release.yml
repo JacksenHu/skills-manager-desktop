@@ -40,49 +40,40 @@ jobs:
             echo "tag $TAG != package.json version $VERSION"; exit 1
           fi
 
-      - name: Package & publish
-        run: npx electron-builder --win --publish always
+      # 纯构建，不走 electron-builder 上传器（其 GitHub 上传会静默丢大文件）
+      - name: Build installer
+        run: npx electron-builder --win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # electron-builder 的 GitHub 上传器偶发静默丢大文件（如 114MB exe），这里用 gh
-      # 显式补传/覆盖全部产物。上传前先清空旧 assets，避免改名/重跑后的残留混淆。
-      - name: Upload artifacts (fallback, clobber)
+      - name: Create release (auto notes)
         shell: bash
         run: |
           TAG="v$(node -p "require('./package.json').version")"
-          RID=$(gh api "repos/$GH_REPO/releases" --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -1)
-          if [ -n "$RID" ]; then
-            for AID in $(gh api "repos/$GH_REPO/releases/$RID" --jq '.assets[].id'); do
-              gh api -X DELETE "repos/$GH_REPO/releases/assets/$AID" >/dev/null 2>&1 || true
-            done
+          gh release view "$TAG" >/dev/null 2>&1 && echo "release already exists" \
+            || gh release create "$TAG" --title "$TAG" --generate-notes --latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+
+      # 上传前若无 latest.yml 则按 electron-updater 格式现生成（version/path/sha512）
+      - name: Upload artifacts
+        shell: bash
+        run: |
+          TAG="v$(node -p "require('./package.json').version")"
+          if [ ! -f release/latest.yml ]; then
+            node -e "
+              const { createHash } = require('crypto');
+              const fs = require('fs');
+              const version = process.argv[1];
+              const file = fs.readdirSync('release').find((f) => f.endsWith('.exe'));
+              const buf = fs.readFileSync('release/' + file);
+              const sha = createHash('sha512').update(buf).digest('base64');
+              fs.writeFileSync('release/latest.yml',
+                'version: ' + version + '\nfiles:\n  - url: ' + file + '\n    sha512: ' + sha + '\n    size: ' + buf.length + '\npath: ' + file + '\nsha512: ' + sha + \"\nreleaseDate: '\" + new Date().toISOString() + \"'\n\");
+            " "$(node -p "require('./package.json').version")"
           fi
           gh release upload "$TAG" release/*.exe release/*.exe.blockmap release/latest.yml --clobber
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-
-      # 转正 release（electron-builder 可能留在草稿态）——核心步骤，不带任何可失败 extras
-      - name: Make release public
-        shell: bash
-        run: |
-          TAG="v$(node -p "require('./package.json').version")"
-          RID=$(gh api "repos/$GH_REPO/releases" --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -1)
-          if [ -z "$RID" ]; then echo "release for $TAG not found"; exit 1; fi
-          gh api -X PATCH "repos/$GH_REPO/releases/$RID" -F draft=false --jq '.tag_name + " published, draft=" + (.draft|tostring)'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-
-      # 发布说明（尽力而为：最近 15 条提交；失败不阻塞发布）
-      - name: Attach release notes (best effort)
-        shell: bash
-        run: |
-          TAG="v$(node -p "require('./package.json').version")"
-          RID=$(gh api "repos/$GH_REPO/releases" --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -1)
-          NOTES=$(git log --pretty=format:'- %s' -15)
-          echo "NOTES: $NOTES" | head -3
-          gh api -X PATCH "repos/$GH_REPO/releases/$RID" -f body="$NOTES" --jq '.body' || echo "notes attach failed (non-blocking)"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
