@@ -25,6 +25,13 @@ export interface AppConfig {
     /** 备份存放目录（绝对路径），备份为 <备份目录>\<技能根名>-<时间戳> */
     path?: string
   }
+  /** 技能库搜索范围（默认技能名 + 简介都开） */
+  search?: {
+    /** 按技能名搜索 */
+    name?: boolean
+    /** 按简介搜索 */
+    intro?: boolean
+  }
 }
 
 /** 技能根的联接状态（与 PowerShell 版 verify.ps1 的状态机一一对应） */

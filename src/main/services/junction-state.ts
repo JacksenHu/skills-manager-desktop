@@ -201,6 +201,71 @@ export function detectSameSourceConflicts(
   return conflicts
 }
 
+/**
+ * 重复加载风险检测 V2（UI 用；PS 对齐验收仍用上面的 V1）。
+ *
+ * V1（PS 语义）把同组内任意两条路径都算重复——但组内可能混有多个软件的专属目录
+ * （如 .codex\skills 与 .cursor\skills 属于不同软件，不会互相重复加载）。
+ *
+ * V2 目录段聚类规则：
+ * - `*.agents\skills` 视为通用根：它与组内任何其他根并存都算重复（读通用目录的
+ *   软件会同时读自己的专属根）
+ * - 其余路径按"目录段"（命中 pattern 的固定首段，如 .codex / .cursor）聚类：
+ *   同段 >= 2 条算重复（同软件多根），跨段不算
+ */
+export function detectDuplicateLoadRisks(
+  paths: string[],
+  groups: SameSourceGroup[]
+): { name: string; paths: string[] }[] {
+  const conflictPaths = paths.filter((p) => {
+    if (!existsSync(p)) return true
+    const stat = lstatSync(p)
+    if (stat.isSymbolicLink()) return true
+    try {
+      if (readdirSync(p).length === 0) {
+        return !matchSameSourceGroup(p, groups) // 已归并排除
+      }
+    } catch {
+      return true
+    }
+    return true
+  })
+
+  const conflicts: { name: string; paths: string[] }[] = []
+  for (const g of groups) {
+    const hits = conflictPaths
+      .map((p) => ({ path: p, pattern: g.patterns.find((pat) => likeMatch(p.toLowerCase(), pat.toLowerCase())) }))
+      .filter((h) => h.pattern !== undefined)
+
+    // 目录段：通用根统一 '@general'；专属按 pattern 固定尾段的第一段目录名
+    const keyOf = (pattern: string, path: string): string => {
+      // 通用根：\agents\skills 或 .agents\skills（两种盘上形态）
+      if (/[\\.]agents[\\/]skills$/i.test(path)) return '@general'
+      const fixed = pattern.replace(/^\*/, '')
+      return (fixed.split('\\').filter(Boolean)[0] ?? fixed).toLowerCase()
+    }
+
+    const byKey = new Map<string, string[]>()
+    for (const h of hits) {
+      const k = keyOf(h.pattern!, h.path)
+      const list = byKey.get(k) ?? []
+      list.push(h.path)
+      byKey.set(k, list)
+    }
+
+    const general = byKey.get('@general') ?? []
+    const conflictSet = new Set<string>()
+    for (const [k, list] of byKey) {
+      if (k === '@general') continue
+      if (list.length >= 2) list.forEach((p) => conflictSet.add(p)) // 同段多根
+      if (general.length > 0) list.forEach((p) => conflictSet.add(p)) // 通用根并存
+    }
+    if (general.length > 0 && byKey.size > 1) general.forEach((p) => conflictSet.add(p))
+    if (conflictSet.size >= 2) conflicts.push({ name: g.name, paths: [...conflictSet] })
+  }
+  return conflicts
+}
+
 /** verify.ps1 输出行同款文案（对齐脚本用它做逐字比对） */
 export function formatVerifyLine(entry: ClassifyResult & { name: string; path: string }): string {
   const name = entry.name

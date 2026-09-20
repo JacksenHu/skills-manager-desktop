@@ -6,7 +6,7 @@ import { configPath, loadConfig, saveConfig } from './services/config'
 import { listAgentStatus } from './services/agents'
 import { detectPresetAgents } from './services/detect'
 import {
-  detectSameSourceConflicts,
+  detectDuplicateLoadRisks,
   loadSameSourceGroups,
   type VerifyVerdict
 } from './services/junction-state'
@@ -87,8 +87,8 @@ export function registerIpc(): void {
   handle('agents:detectPresets', () => {
     const config: AppConfig = loadConfig()
     const detected = detectPresetAgents(config)
-    // 同源多根冲突：按探测出的全部实际路径算（比 config 视野更全）
-    const conflicts = detectSameSourceConflicts(detected.map((d) => d.path), loadSameSourceGroups())
+    // 重复加载风险：V2 目录段聚类（不同软件的专属目录不互报；通用根 .agents\skills 并存才报）
+    const conflicts = detectDuplicateLoadRisks(detected.map((d) => d.path), loadSameSourceGroups())
     const FAILS: VerifyVerdict[] = ['fail-missing', 'fail-not-link', 'fail-wrong-target']
     const failCount = detected.filter((d) => FAILS.includes(d.state as VerifyVerdict)).length
     return { detected, conflicts, failCount }

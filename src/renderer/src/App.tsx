@@ -327,7 +327,7 @@ export default function App() {
           />
         )}
 
-        {tab === 'skills' && <SkillsPanel refreshTick={refreshTick} />}
+        {tab === 'skills' && <SkillsPanel refreshTick={refreshTick} config={config} />}
         {tab === 'updates' && <UpdatesPanel refreshTick={refreshTick} />}
       </main>
 

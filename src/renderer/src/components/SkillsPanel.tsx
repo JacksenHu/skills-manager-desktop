@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FolderOpen, Info, Languages, Link2, Plus, RefreshCw, Route, Search, Tag, Tags, Trash2, X } from 'lucide-react'
-import type { IpcResult, OpResult, RepoSearchResult, SkillInfo } from '@shared/types'
+import type { AppConfig, IpcResult, OpResult, RepoSearchResult, SkillInfo } from '@shared/types'
 import { ConfirmDialog, Modal, ResultModal } from './Modal'
 
 const CATEGORY_ORDER = [
@@ -110,7 +110,13 @@ function RepoSearch({ onPick }: { onPick: (url: string) => void }) {
   )
 }
 
-export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
+export function SkillsPanel({
+  refreshTick,
+  config
+}: {
+  refreshTick: number
+  config: AppConfig | null
+}) {
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [customCats, setCustomCats] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
@@ -138,6 +144,7 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
   const [batchOpen, setBatchOpen] = useState(false)
   const [batchUrls, setBatchUrls] = useState<Record<string, string>>({})
   const [batchSearchRow, setBatchSearchRow] = useState<string | null>(null)
+  const [keyword, setKeyword] = useState('')
 
   const run = useCallback(async () => {
     setLoading(true)
@@ -194,7 +201,20 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
     return [...CATEGORY_ORDER, ...extra.sort()]
   }, [skills])
 
-  const visible = filter === '全部' ? skills : skills.filter((s) => s.category === filter)
+  const visible = useMemo(() => {
+    let list = filter === '全部' ? skills : skills.filter((s) => s.category === filter)
+    const kw = keyword.trim().toLowerCase()
+    if (kw) {
+      const byName = config?.search?.name !== false
+      const byIntro = config?.search?.intro !== false
+      list = list.filter((s) => {
+        if (byName && s.name.toLowerCase().includes(kw)) return true
+        if (byIntro && (s.introZh || s.intro).toLowerCase().includes(kw)) return true
+        return false
+      })
+    }
+    return list
+  }, [skills, filter, keyword, config])
   const noSourceCount = skills.filter((s) => !s.source).length
   const hasRouter = skills.some((s) => s.name === 'router-guide')
   const [routerTipDismissed, setRouterTipDismissed] = useState(false)
@@ -284,6 +304,29 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
         >
           <Tags className="h-3.5 w-3.5" />
         </button>
+      </div>
+
+      {/* 搜索框 */}
+      <div className="mb-4 flex items-center gap-2">
+        <Search className="h-4 w-4 shrink-0 text-slate-400" />
+        <input
+          value={keyword}
+          onChange={(e) => setKeyword(e.target.value)}
+          placeholder={
+            config?.search?.intro === false
+              ? '搜索技能名…'
+              : '搜索技能名或简介…'
+          }
+          className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-sky-400 dark:border-slate-600"
+        />
+        {keyword && (
+          <button
+            onClick={() => setKeyword('')}
+            className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       {/* 路由技能提示条（明显提醒：需在会话中手动启用） */}

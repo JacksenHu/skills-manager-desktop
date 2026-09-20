@@ -157,8 +157,11 @@ export function listSkills(config: AppConfig): SkillInfo[] {
     const manualCategory = String(meta.category ?? '').trim()
     out.push({
       name: entry.name,
-      // 手动指定的分类优先于自动判定
-      category: manualCategory || classifySkill(entry.name, introZh || intro, fm),
+      // 路由技能固定归入内置分类；其次手动指定；再退回关键词自动分类
+      category:
+        entry.name === 'router-guide'
+          ? 'Agent 与技能管理'
+          : manualCategory || classifySkill(entry.name, introZh || intro, fm),
       intro,
       introZh,
       source: meta.source?.toString(),
@@ -560,6 +563,8 @@ export async function generateRouter(config: AppConfig): Promise<OpResult> {
   if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true })
   // PS 用 UTF8 BOM 写出，保持一致（部分 Windows 工具链读无 BOM 的 UTF-8 会乱码）
   writeFileSync(join(outDir, 'SKILL.md'), '\uFEFF' + buildRouterMarkdown(items, root), 'utf8')
+  // 路由技能固定分类（_meta.json 落盘，列表/过滤稳定归属）
+  writeMeta(outDir, { name: 'skill-router', category: 'Agent 与技能管理' })
 
   return {
     logs: [

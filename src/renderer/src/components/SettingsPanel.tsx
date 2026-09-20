@@ -214,6 +214,25 @@ export function SettingsPanel({
         />
       </Section>
 
+      {/* 技能库搜索范围 */}
+      <Section title="技能库搜索范围">
+        <div className="flex flex-wrap items-center gap-4">
+          <Toggle
+            checked={config?.search?.name !== false}
+            onChange={(v) => void update({ search: { name: v } }, v ? '搜索包含技能名' : '搜索不含技能名')}
+            label="按技能名搜索"
+          />
+          <Toggle
+            checked={config?.search?.intro !== false}
+            onChange={(v) => void update({ search: { intro: v } }, v ? '搜索包含简介' : '搜索不含简介')}
+            label="按简介搜索"
+          />
+        </div>
+        <div className="text-xs text-slate-500 dark:text-slate-400">
+          至少保留一项，否则技能库搜索框无结果。
+        </div>
+      </Section>
+
       {/* 接入备份 */}
       <Section title="接入备份">
         <Toggle
