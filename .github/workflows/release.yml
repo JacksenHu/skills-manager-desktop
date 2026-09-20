@@ -77,3 +77,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+
+      # 删 tag 重发会遗留孤儿 draft（create 步骤会误判"已存在"），这里强制转正
+      - name: Publish (ensure not draft)
+        shell: bash
+        run: |
+          TAG="v$(node -p "require('./package.json').version")"
+          RID=$(gh api "repos/$GH_REPO/releases" --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -1)
+          if [ -z "$RID" ]; then echo "release for $TAG not found"; exit 1; fi
+          gh api -X PATCH "repos/$GH_REPO/releases/$RID" -F draft=false --jq '.tag_name + " published, draft=" + (.draft|tostring)'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
