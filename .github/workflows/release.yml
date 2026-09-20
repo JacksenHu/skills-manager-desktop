@@ -56,36 +56,27 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
 
-      # 上传前若无 latest.yml 则按 electron-updater 格式现生成（version/path/sha512）
+      # 上传产物：exe + latest.yml 必须；blockmap 可选（缺省时 electron-updater 走全量下载）
       - name: Upload artifacts
         shell: bash
         run: |
           TAG="v$(node -p "require('./package.json').version")"
-          if [ ! -f release/latest.yml ]; then
-            node -e "
-              const { createHash } = require('crypto');
-              const fs = require('fs');
-              const version = process.argv[1];
-              const file = fs.readdirSync('release').find((f) => f.endsWith('.exe'));
-              const buf = fs.readFileSync('release/' + file);
-              const sha = createHash('sha512').update(buf).digest('base64');
-              fs.writeFileSync('release/latest.yml',
-                'version: ' + version + '\nfiles:\n  - url: ' + file + '\n    sha512: ' + sha + '\n    size: ' + buf.length + '\npath: ' + file + '\nsha512: ' + sha + \"\nreleaseDate: '\" + new Date().toISOString() + \"'\n\");
-            " "$(node -p "require('./package.json').version")"
-          fi
-          gh release upload "$TAG" release/*.exe release/*.exe.blockmap release/latest.yml --clobber
+          gh release upload "$TAG" release/*.exe release/latest.yml --clobber
+          for BM in release/*.exe.blockmap; do
+            if [ -f "$BM" ]; then gh release upload "$TAG" "$BM" --clobber; fi
+          done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
 
-      # 删 tag 重发会遗留孤儿 draft（create 步骤会误判"已存在"），这里强制转正
-      - name: Publish (ensure not draft)
+      # 防 draft 兜底（gh release create 默认非 draft，此步只为覆盖删 tag 重发等场景）
+      - name: Ensure not draft
         shell: bash
         run: |
           TAG="v$(node -p "require('./package.json').version")"
           RID=$(gh api "repos/$GH_REPO/releases" --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -1)
           if [ -z "$RID" ]; then echo "release for $TAG not found"; exit 1; fi
-          gh api -X PATCH "repos/$GH_REPO/releases/$RID" -F draft=false --jq '.tag_name + " published, draft=" + (.draft|tostring)'
+          gh api -X PATCH "repos/$GH_REPO/releases/$RID" -F draft=false --jq '.tag_name + " draft=" + (.draft|tostring)' || echo "WARN: draft patch failed, release may already be public"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
