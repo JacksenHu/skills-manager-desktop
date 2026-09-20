@@ -46,15 +46,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # electron-builder 的 GitHub 上传器偶发静默丢大文件（如 114MB exe），这里用 gh
-      # 显式补传/覆盖全部产物，保证 exe + blockmap + latest.yml 三件套齐全
+      # 显式补传/覆盖全部产物。上传前先清空旧 assets，避免改名/重跑后的残留混淆。
       - name: Upload artifacts (fallback, clobber)
         shell: bash
         run: |
-          gh release upload "$(node -p "require('./package.json').version" | sed 's/^/v/')" \
-            release/*.exe \
-            release/*.exe.blockmap \
-            release/latest.yml \
-            --clobber
+          TAG="v$(node -p "require('./package.json').version")"
+          RID=$(gh api "repos/$GH_REPO/releases" --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -1)
+          if [ -n "$RID" ]; then
+            for AID in $(gh api "repos/$GH_REPO/releases/$RID" --jq '.assets[].id'); do
+              gh api -X DELETE "repos/$GH_REPO/releases/assets/$AID" >/dev/null 2>&1 || true
+            done
+          fi
+          gh release upload "$TAG" release/*.exe release/*.exe.blockmap release/latest.yml --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}

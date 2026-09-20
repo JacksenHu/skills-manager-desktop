@@ -44,6 +44,7 @@
       "repo": "skills-manager-desktop",
       "releaseType": "release"
     },
+    "artifactName": "${productName}-Setup-${version}.${ext}",
     "win": {
       "icon": "resources/icon.ico",
       "target": [
