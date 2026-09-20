@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import type { AppConfig, HubCategory, HubListResult, HubSkill, HubSkillDetail, OpResult } from '@shared/types'
 import { httpGet, httpGetJson } from './translate'
-import { writeMeta } from './skills'
+import { skillDirOrThrow, writeMeta } from './skills'
 
 /**
  * P11 SkillHub 平台集成（https://skillhub.cn，API base https://api.skillhub.cn）。
@@ -169,6 +169,26 @@ function sha256(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex')
 }
 
+/**
+ * 查询平台当前版本号：详情接口没有 version 字段，只有列表接口带。
+ * keyword=slug 搜索后按 slug+namespace 精确匹配；找不到返回 undefined。
+ */
+export async function fetchHubVersion(
+  config: AppConfig,
+  slug: string,
+  namespace: string
+): Promise<string | undefined> {
+  const j = await httpGetJson<{ code?: number; data?: { skills?: HubApiSkill[] } }>(
+    `${HUB_API}/api/skills?page=1&pageSize=8&keyword=${encodeURIComponent(slug)}`,
+    { headers: HUB_HEADERS, timeoutMs: 30000, insecure: config.net?.allowInsecureTls ?? false }
+  )
+  for (const s of j.data?.skills ?? []) {
+    const ns = typeof s.namespace === 'string' ? s.namespace : s.namespace?.handle ?? ''
+    if (s.slug === slug && ns === namespace) return s.version || undefined
+  }
+  return undefined
+}
+
 function countFiles(dir: string): number {
   let n = 0
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -255,15 +275,17 @@ export async function installHubSkill(
   logs.push(`[OK] 已写入 ${done}/${files.length} 个文件${hashMismatch ? `，${hashMismatch} 个校验失败跳过` : ''}`)
 
   const catName = catList.find((c) => c.key === detail.category)?.name ?? '未分类'
+  // 版本号以列表接口为准（详情接口无 version 字段）
+  const hubVersion = (await fetchHubVersion(config, slug, namespace)) ?? detail.version
   writeMeta(skillDir, {
     name: detail.name,
     descriptionZh: detail.summary || detail.description,
     source: detail.hubUrl,
-    version: detail.version || undefined,
+    version: hubVersion || undefined,
     installedAt: new Date().toISOString().slice(0, 10),
     category: catName === '未分类' ? undefined : catName
   })
-  logs.push(`[OK] 已写入 _meta.json（来源 ${detail.hubUrl}，版本 ${detail.version || '未标注'}，分类「${catName}」）`)
+  logs.push(`[OK] 已写入 _meta.json（来源 ${detail.hubUrl}，版本 ${hubVersion || '未标注'}，分类「${catName}」）`)
   logs.push(`[OK] 安装完成，共 ${countFiles(skillDir)} 个文件。可在「技能库」中查看，更新检测以来源链接为基准。`)
   return { logs }
 }
@@ -272,4 +294,116 @@ export async function installHubSkill(
 export function hubSkillInstalled(allSources: (string | undefined)[], slug: string, namespace: string): boolean {
   const marker = `/skills/${namespace}/${slug}`
   return allSources.some((s) => typeof s === 'string' && s.includes(marker))
+}
+
+// ---------- 来源自动匹配（补全来源：按名称/简介在 SkillHub 搜，命中自动写来源+版本） ----------
+
+export interface HubMatchResult {
+  matched: boolean
+  slug?: string
+  namespace?: string
+  name?: string
+  version?: string
+  hubUrl?: string
+  score: number
+  note?: string
+}
+
+const normKey = (s: string): string =>
+  s
+    .toLowerCase()
+    .replace(/[._\-\s]+/g, '')
+    .replace(/skill$/, '')
+
+function scoreHubCandidate(c: HubApiSkill, dirName: string, displayName?: string): number {
+  const cs = normKey(String(c.slug ?? ''))
+  const cn = normKey(String(c.name ?? ''))
+  const dn = normKey(dirName)
+  let best = 0
+  if (dn && cs === dn) best = Math.max(best, 100)
+  if (dn && cs && cs.length > 2 && (cs.includes(dn) || dn.includes(cs))) best = Math.max(best, 70)
+  if (displayName) {
+    const dn2 = normKey(displayName)
+    if (dn2 && cn === dn2) best = Math.max(best, 92)
+    if (cn.length > 2 && dn2 && (cn.includes(dn2) || dn2.includes(cn))) best = Math.max(best, 62)
+  }
+  return best
+}
+
+/**
+ * 在 SkillHub 里搜索与本地技能（目录名 / 显示名 / 简介）匹配的技能。
+ * 多段查询（目录名 → 显示名 → 简介关键片段），归一化打分，>= 60 分视为匹配。
+ */
+export async function matchHubSkill(
+  config: AppConfig,
+  dirName: string,
+  displayName?: string,
+  intro?: string
+): Promise<HubMatchResult> {
+  const queries: string[] = []
+  if (dirName?.trim()) queries.push(dirName.trim())
+  if (displayName?.trim() && normKey(displayName) !== normKey(dirName)) queries.push(displayName.trim())
+  const introQ = (intro ?? '')
+    .replace(/[#>*`|\-[\]()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 24)
+  if (introQ.length >= 6) queries.push(introQ)
+
+  let best: HubMatchResult = { matched: false, score: 0, note: 'SkillHub 未找到匹配' }
+  const seen = new Set<string>()
+  for (const q of queries) {
+    try {
+      const j = await httpGetJson<{ code?: number; data?: { skills?: HubApiSkill[] } }>(
+        `${HUB_API}/api/skills?page=1&pageSize=8&keyword=${encodeURIComponent(q)}`,
+        { headers: HUB_HEADERS, timeoutMs: 30000, insecure: config.net?.allowInsecureTls ?? false }
+      )
+      for (const c of j.data?.skills ?? []) {
+        const ns = typeof c.namespace === 'string' ? c.namespace : c.namespace?.handle ?? ''
+        const key = `${ns}/${c.slug ?? ''}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        const sc = scoreHubCandidate(c, dirName, displayName)
+        if (sc > best.score) {
+          const matched = sc >= 60
+          best = {
+            matched,
+            score: sc,
+            slug: c.slug,
+            namespace: ns,
+            name: (c.name ?? c.slug ?? '').trim(),
+            version: c.version ?? '',
+            hubUrl: `${HUB_WEB}/skills/${ns}/${c.slug}`,
+            note: matched ? `关键词匹配（相似度 ${sc}）` : undefined
+          }
+        }
+      }
+      if (best.score >= 100) break
+    } catch {
+      // 单段查询失败继续下一段
+    }
+  }
+  return best
+}
+
+/** 把匹配结果写入技能 _meta（source = SkillHub 详情页，version 落盘，供更新页检测） */
+export async function applyHubSource(
+  config: AppConfig,
+  skillName: string,
+  match: HubMatchResult,
+  skillMeta?: { displayName?: string; intro?: string }
+): Promise<OpResult> {
+  if (!match.matched || !match.slug || !match.namespace) {
+    return { logs: [`[跳过] ${skillName}: ${match.note ?? 'SkillHub 未找到匹配'}`] }
+  }
+  const dir = skillDirOrThrow(config, skillName)
+  writeMeta(dir, { source: match.hubUrl!, version: match.version || undefined })
+  const logs = [
+    `[OK] ${skillName} → SkillHub「${match.name}」（v${match.version || '?'}，相似度 ${match.score}）`,
+    `     来源: ${match.hubUrl}`,
+    skillMeta?.displayName && normKey(skillMeta.displayName) !== normKey(match.name ?? '')
+      ? '     注意：平台名称与本地名称不完全一致，请核实是否同一技能'
+      : '     更新页将按此来源检测新版本。'
+  ]
+  return { logs }
 }

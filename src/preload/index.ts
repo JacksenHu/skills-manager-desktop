@@ -33,7 +33,9 @@ const api = {
     renameCategory: (from: string, to: string) =>
       ipcRenderer.invoke('skills:renameCategory', from, to),
     setSource: (name: string, url: string) => ipcRenderer.invoke('skills:setSource', name, url),
-    searchRepos: (keyword: string) => ipcRenderer.invoke('skills:searchRepos', keyword)
+    searchRepos: (keyword: string) => ipcRenderer.invoke('skills:searchRepos', keyword),
+    autoSource: (name: string) => ipcRenderer.invoke('skills:autoSource', name),
+    autoSourceAll: () => ipcRenderer.invoke('skills:autoSourceAll')
   },
   hub: {
     bootstrap: () => ipcRenderer.invoke('hub:bootstrap'),

@@ -11,6 +11,7 @@ import type {
 } from '@shared/types'
 import { httpGetJson, httpGetResponse } from './translate'
 import { installSkills, listSkills } from './skills'
+import { fetchHubVersion, installHubSkill } from './hub'
 
 /**
  * P6 更新检测（check-updates.ps1 / check-project-updates.ps1 的 Node 版）。
@@ -35,6 +36,14 @@ export function parseRepoKey(source: string | undefined): string | null {
   const m = /github\.com[:/]([^/\s]+)\/([^/\s#?]+)/.exec(source)
   if (!m) return null
   return `${m[1]}/${m[2].replace(/\.git$/, '')}`
+}
+
+/** SkillHub 来源链接（来源自动匹配写入的形态）：返回 {namespace, slug} */
+export function parseHubSkillSource(source: string | undefined): { namespace: string; slug: string } | null {
+  if (!source) return null
+  const m = /skillhub\.cn\/skills\/([^/\s]+)\/([^/\s#?]+)/i.exec(source)
+  if (!m) return null
+  return { namespace: m[1], slug: m[2] }
 }
 
 /**
@@ -77,10 +86,13 @@ export function groupByRepo(skills: SkillInfo[]): {
   return { repos: order.map((k) => map.get(k)!), noSource }
 }
 
-/** 技能更新检测（每仓库 1 次 GitHub API 请求；403/429 视为限速） */
+/** 技能更新检测（GitHub 每仓库 1 次 API；SkillHub 来源逐技能走平台详情接口） */
 export async function checkSkillUpdates(config: AppConfig): Promise<CheckUpdatesResult> {
   const skills = listSkills(config)
   const { repos, noSource } = groupByRepo(skills)
+
+  // SkillHub 来源的技能单独检测（meta.version 对比平台最新 version）
+  const hubSkills = skills.filter((s) => parseHubSkillSource(s.source))
 
   const headers: Record<string, string> = { 'User-Agent': 'agent-skills-shared' }
   if (config.net?.token) headers.Authorization = `Bearer ${config.net.token}`
@@ -109,16 +121,59 @@ export async function checkSkillUpdates(config: AppConfig): Promise<CheckUpdates
       remoteSha: remoteSha || undefined
     })
   }
-  return { repos: out, noSource }
+
+  // SkillHub 来源：meta.version vs 平台 version（列表接口）；repo 标识 skillhub:{ns}/{slug}
+  for (const s of hubSkills) {
+    const parsed = parseHubSkillSource(s.source)!
+    let state: RepoUpdateState = 'error'
+    let remoteVersion: string | undefined
+    try {
+      remoteVersion = await fetchHubVersion(config, parsed.slug, parsed.namespace)
+      if (!remoteVersion) {
+        state = 'error'
+      } else if (!s.version) {
+        state = 'no-baseline'
+      } else {
+        state = normVersion(s.version) === normVersion(remoteVersion) ? 'latest' : 'update'
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      state = /HTTP 404/.test(msg) ? 'gone' : 'error'
+    }
+    out.push({
+      repo: `skillhub:${parsed.namespace}/${parsed.slug}`,
+      skills: [s.name],
+      state,
+      localSha: s.version || undefined,
+      remoteSha: remoteVersion
+    })
+  }
+
+  // noSource 只收真正无来源的技能（GitHub/SkillHub 之外的来源也算无基准）
+  const known = new Set(out.flatMap((o) => o.skills))
+  const rest = noSource.filter((n) => !known.has(n.name))
+  return { repos: out, noSource: rest }
 }
 
-/** 一键升级：对指定仓库逐个重新安装（-Replace 覆盖本地旧版，check-updates.ps1 -Update 同语义） */
+const normVersion = (v: string): string => v.trim().replace(/^v/i, '')
+
+/** 一键升级：GitHub 仓库走重新安装；SkillHub 来源走平台重装（覆盖 + 刷新版本基准） */
 export async function updateSkills(config: AppConfig, repos: string[]): Promise<OpResult> {
   const logs: string[] = ['========== 开始自动升级（重新安装 -Replace）==========']
   for (const repo of repos) {
-    const url = `https://github.com/${repo}`
-    logs.push(`升级: ${url}`)
     try {
+      if (repo.startsWith('skillhub:')) {
+        const rest = repo.slice('skillhub:'.length)
+        const idx = rest.indexOf('/')
+        const ns = rest.slice(0, idx)
+        const slug = rest.slice(idx + 1)
+        logs.push(`升级 SkillHub 技能: ${ns}/${slug}`)
+        const r = await installHubSkill(config, slug, ns, { replace: true })
+        logs.push(...r.logs)
+        continue
+      }
+      const url = `https://github.com/${repo}`
+      logs.push(`升级: ${url}`)
       const r = await installSkills(config, url, { replace: true })
       logs.push(...r.logs)
     } catch (e) {

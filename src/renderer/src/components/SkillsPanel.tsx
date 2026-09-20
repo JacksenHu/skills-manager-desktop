@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { FolderOpen, Info, Languages, Link2, Plus, RefreshCw, Route, Search, Tag, Tags, Trash2, X } from 'lucide-react'
+import { FolderOpen, Info, Languages, Link2, Plus, RefreshCw, Route, Search, Sparkles, Tag, Tags, Trash2, X } from 'lucide-react'
 import type { AppConfig, IpcResult, OpResult, RepoSearchResult, SkillInfo } from '@shared/types'
 import { ConfirmDialog, Modal, ResultModal } from './Modal'
 
@@ -597,6 +597,19 @@ export function SkillsPanel({
               </div>
               <RepoSearch onPick={(url) => setSourceUrl(url)} />
             </div>
+            <button
+              onClick={() => {
+                const t = sourceTarget
+                setSourceTarget(null)
+                setBusy('source')
+                void execute(`SkillHub 自动匹配：${t.name}`, () => window.api.skills.autoSource(t.name))
+              }}
+              disabled={busy !== null}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-500 transition hover:bg-emerald-500/20 disabled:opacity-50"
+            >
+              <Sparkles className="h-4 w-4" />
+              SkillHub 自动匹配（按技能名/简介搜平台，命中自动写来源+版本）
+            </button>
             {sourceTarget.source && (
               <div className="text-xs text-slate-500 dark:text-slate-400">
                 当前来源：{sourceTarget.source}
@@ -635,6 +648,19 @@ export function SkillsPanel({
             <div className="text-slate-600 dark:text-slate-300">
               为没有来源信息的技能逐个填仓库链接（可留空跳过）。保存时自动获取当前提交作为版本基准。
             </div>
+            <button
+              onClick={() => {
+                setBatchOpen(false)
+                setBusy('source')
+                void execute('SkillHub 自动匹配来源', () => window.api.skills.autoSourceAll())
+              }}
+              disabled={busy !== null}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm text-emerald-500 transition hover:bg-emerald-500/20 disabled:opacity-50"
+            >
+              <Sparkles className="h-4 w-4" />
+              SkillHub 一键自动匹配（按技能名/简介搜索，自动写来源+版本）
+            </button>
+            <div className="text-center text-xs text-slate-400">— 或手动逐行填写 —</div>
             <div className="max-h-80 space-y-2 overflow-auto pr-1">
               {skills
                 .filter((s) => !s.source)

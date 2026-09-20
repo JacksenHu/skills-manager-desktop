@@ -581,7 +581,7 @@ export async function generateRouter(config: AppConfig): Promise<OpResult> {
 
 // ---------- 分类管理（手动指定 / 自定义分类 / 重命名） ----------
 
-function skillDirOrThrow(config: AppConfig, name: string): string {
+export function skillDirOrThrow(config: AppConfig, name: string): string {
   if (name.includes('/') || name.includes('\\') || name.includes('..')) {
     throw new Error(`非法技能名: ${name}`)
   }

@@ -14,7 +14,9 @@ import {
   fetchHubCategories,
   fetchHubSkillDetail,
   installHubSkill,
-  listHubSkills
+  listHubSkills,
+  matchHubSkill,
+  applyHubSource
 } from './services/hub'
 import {
   buildMergePlans,
@@ -237,6 +239,38 @@ export function registerIpc(): void {
       replace: replace !== false,
       githubInstaller: (url) => installSkills(cfg, url, { replace: true })
     })
+  })
+
+  /** 来源自动匹配：按技能名/简介在 SkillHub 搜，命中自动写来源+版本 */
+  handle('skills:autoSource', async (name: string) => {
+    const cfg = loadConfig()
+    const info = listSkills(cfg).find((s) => s.name === name)
+    if (!info) throw new Error(`共享库中找不到技能: ${name}`)
+    const match = await matchHubSkill(cfg, info.name, undefined, info.introZh || info.intro)
+    return applyHubSource(cfg, name, match)
+  })
+
+  /** 批量自动匹配：对所有无来源技能逐个匹配（上限 40 个，防超时） */
+  handle('skills:autoSourceAll', async () => {
+    const cfg = loadConfig()
+    const pending = listSkills(cfg).filter((s) => !s.source).slice(0, 40)
+    if (pending.length === 0) return { logs: ['所有技能都已有来源，无需补全。'] }
+    const logs: string[] = [`开始 SkillHub 自动匹配（${pending.length} 个技能，每技能 1-2 次平台搜索）…`]
+    let ok = 0
+    let skip = 0
+    for (const s of pending) {
+      try {
+        const match = await matchHubSkill(cfg, s.name, undefined, s.introZh || s.intro)
+        const r = await applyHubSource(cfg, s.name, match)
+        logs.push(...r.logs)
+        if (match.matched) ok++
+        else skip++
+      } catch (e) {
+        logs.push(`[FAIL] ${s.name}: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+    logs.unshift(`[完成] 匹配并写入 ${ok} 个，未匹配 ${skip} 个。`)
+    return { logs }
   })
 
   // ---------- P6 更新检测 ----------
