@@ -40,18 +40,22 @@ jobs:
             echo "tag $TAG != package.json version $VERSION"; exit 1
           fi
 
-      # 纯构建，不走 electron-builder 上传器（其 GitHub 上传会静默丢大文件）
+      # 纯构建。必须显式 --publish never：CI 里 GH_TOKEN + tag 会触发 electron-builder
+      # 默认的 onTagOrDraft 自动发布（其上传器会静默丢大文件并产生重复 release）
       - name: Build installer
-        run: npx electron-builder --win
+        run: npx electron-builder --win --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create release (auto notes)
+      - name: Recreate clean release (auto notes)
         shell: bash
         run: |
           TAG="v$(node -p "require('./package.json').version")"
-          gh release view "$TAG" >/dev/null 2>&1 && echo "release already exists" \
-            || gh release create "$TAG" --title "$TAG" --generate-notes --latest
+          # 删掉该 tag 名下的全部旧 release（含孤儿 draft），保证单份干净
+          for RID in $(gh api "repos/$GH_REPO/releases" --jq ".[] | select(.tag_name==\"$TAG\") | .id"); do
+            gh api -X DELETE "repos/$GH_REPO/releases/$RID" >/dev/null 2>&1 || true
+          done
+          gh release create "$TAG" --title "$TAG" --generate-notes --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
