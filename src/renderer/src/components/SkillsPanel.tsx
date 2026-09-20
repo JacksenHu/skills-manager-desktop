@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { FolderOpen, Info, Languages, Link2, Plus, RefreshCw, Route, Tag, Tags, Trash2, X } from 'lucide-react'
-import type { IpcResult, OpResult, SkillInfo } from '@shared/types'
+import { FolderOpen, Info, Languages, Link2, Plus, RefreshCw, Route, Search, Tag, Tags, Trash2, X } from 'lucide-react'
+import type { IpcResult, OpResult, RepoSearchResult, SkillInfo } from '@shared/types'
 import { ConfirmDialog, Modal, ResultModal } from './Modal'
 
 const CATEGORY_ORDER = [
@@ -39,6 +39,77 @@ function chipCls(category: string): string {
   return CHIP_COLORS[h % (CHIP_COLORS.length - 1)]
 }
 
+/** GitHub 仓库搜索内联组件：结果点选后回填来源（用户仍需手动确认保存） */
+function RepoSearch({ onPick }: { onPick: (url: string) => void }) {
+  const [kw, setKw] = useState('')
+  const [results, setResults] = useState<RepoSearchResult[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const doSearch = useCallback(async () => {
+    if (!kw.trim()) return
+    setBusy(true)
+    setErr(null)
+    try {
+      const r = (await window.api.skills.searchRepos(kw.trim())) as IpcResult<RepoSearchResult[]>
+      if (!r.ok) throw new Error(r.error)
+      setResults(r.data)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }, [kw])
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-2.5 dark:border-slate-700">
+      <div className="flex items-center gap-1.5">
+        <input
+          value={kw}
+          onChange={(e) => setKw(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && void doSearch()}
+          placeholder="搜索 GitHub 仓库（如技能名 / 关键词）"
+          className="flex-1 rounded-md border border-slate-300 bg-transparent px-2.5 py-1 text-xs outline-none focus:border-sky-400 dark:border-slate-600"
+        />
+        <button
+          onClick={() => void doSearch()}
+          disabled={busy || !kw.trim()}
+          className="flex items-center gap-1 rounded-md bg-sky-500/10 px-2 py-1 text-xs text-sky-500 hover:bg-sky-500/20 disabled:opacity-50"
+        >
+          <Search className="h-3 w-3" />
+          {busy ? '搜索中…' : '搜索'}
+        </button>
+      </div>
+      {err && <div className="mt-1.5 text-xs text-red-400">{err}</div>}
+      {results !== null && !busy && (
+        <div className="mt-2 max-h-48 space-y-1 overflow-auto">
+          {results.length === 0 ? (
+            <div className="text-xs text-slate-400">没有匹配的仓库</div>
+          ) : (
+            results.map((r) => (
+              <button
+                key={r.repo}
+                onClick={() => onPick(`https://github.com/${r.repo}`)}
+                title={r.description}
+                className="block w-full rounded-md px-2 py-1 text-left transition hover:bg-sky-500/10"
+              >
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="font-mono text-sky-500">{r.repo}</span>
+                  <span className="text-slate-400">★ {r.stars}</span>
+                </div>
+                {r.description && (
+                  <div className="truncate text-[10px] text-slate-400">{r.description}</div>
+                )}
+              </button>
+            ))
+          )}
+          <div className="text-[10px] text-slate-400">点选结果回填链接，确认后仍需手动保存。</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [customCats, setCustomCats] = useState<string[]>([])
@@ -66,6 +137,7 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
   const [sourceUrl, setSourceUrl] = useState('')
   const [batchOpen, setBatchOpen] = useState(false)
   const [batchUrls, setBatchUrls] = useState<Record<string, string>>({})
+  const [batchSearchRow, setBatchSearchRow] = useState<string | null>(null)
 
   const run = useCallback(async () => {
     setLoading(true)
@@ -476,6 +548,12 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
               placeholder="https://github.com/owner/repo"
               className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-sky-400 dark:border-slate-600"
             />
+            <div>
+              <div className="mb-1.5 text-xs text-slate-500 dark:text-slate-400">
+                或搜索 GitHub / skills.sh 技能仓库，点选回填（仍需手动确认保存）：
+              </div>
+              <RepoSearch onPick={(url) => setSourceUrl(url)} />
+            </div>
             {sourceTarget.source && (
               <div className="text-xs text-slate-500 dark:text-slate-400">
                 当前来源：{sourceTarget.source}
@@ -518,14 +596,38 @@ export function SkillsPanel({ refreshTick }: { refreshTick: number }) {
               {skills
                 .filter((s) => !s.source)
                 .map((s) => (
-                  <div key={s.name} className="flex items-center gap-2">
-                    <span className="w-40 shrink-0 truncate font-mono text-xs">{s.name}</span>
-                    <input
-                      value={batchUrls[s.name] ?? ''}
-                      onChange={(e) => setBatchUrls((m) => ({ ...m, [s.name]: e.target.value }))}
-                      placeholder="https://github.com/owner/repo（留空跳过）"
-                      className="flex-1 rounded-lg border border-slate-300 bg-transparent px-2.5 py-1.5 font-mono text-xs outline-none focus:border-sky-400 dark:border-slate-600"
-                    />
+                  <div key={s.name}>
+                    <div className="flex items-center gap-2">
+                      <span className="w-36 shrink-0 truncate font-mono text-xs">{s.name}</span>
+                      <input
+                        value={batchUrls[s.name] ?? ''}
+                        onChange={(e) => setBatchUrls((m) => ({ ...m, [s.name]: e.target.value }))}
+                        placeholder="https://github.com/owner/repo（留空跳过）"
+                        className="flex-1 rounded-lg border border-slate-300 bg-transparent px-2.5 py-1.5 font-mono text-xs outline-none focus:border-sky-400 dark:border-slate-600"
+                      />
+                      <button
+                        onClick={() => setBatchSearchRow(batchSearchRow === s.name ? null : s.name)}
+                        title="搜索 GitHub 仓库"
+                        className={
+                          'shrink-0 rounded-md p-1.5 transition ' +
+                          (batchSearchRow === s.name
+                            ? 'bg-sky-500/15 text-sky-500'
+                            : 'text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800')
+                        }
+                      >
+                        <Search className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    {batchSearchRow === s.name && (
+                      <div className="mt-1.5">
+                        <RepoSearch
+                          onPick={(url) => {
+                            setBatchUrls((m) => ({ ...m, [s.name]: url }))
+                            setBatchSearchRow(null)
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
                 ))}
             </div>

@@ -14,10 +14,16 @@ export interface AppConfig {
   net?: {
     /** GitHub Token，可选，仅用于提高 API 配额 */
     token?: string
-    /** 是否允许对 GitHub 域放宽 TLS 校验（本机代理根证书不在 Node CA 库时的兜底） */
+    /** 是否允许对 GitHub 域放宽 TLS 校验（本机代理根证书不在 Node CA 库时的兜底；网络层失败本就自动降级重试） */
     allowInsecureTls?: boolean
     /** MyMemory 翻译接口的邮箱（官方 de= 参数，可显著提高匿名每日配额） */
     translateEmail?: string
+  }
+  /** 接入备份：首次接入（内容迁移前）是否把原技能根整目录备份一份 */
+  backup?: {
+    enabled?: boolean
+    /** 备份存放目录（绝对路径），备份为 <备份目录>\<技能根名>-<时间戳> */
+    path?: string
   }
 }
 
@@ -179,6 +185,15 @@ export interface ToolUpdateInfo {
   remoteVersion?: string
   /** unavailable 时的原因（auth / notfound / net） */
   reason?: string
+}
+
+/** GitHub 仓库搜索结果（skills:searchRepos 输出） */
+export interface RepoSearchResult {
+  /** owner/repo */
+  repo: string
+  description: string
+  stars: number
+  url: string
 }
 
 /** 工具的历史发布记录（GitHub Releases，用于展示更新说明 / 更新日志） */

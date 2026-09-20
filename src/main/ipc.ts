@@ -24,6 +24,7 @@ import {
   listCustomCategories,
   removeSkill,
   renameCategory,
+  searchRepos,
   setSkillCategory,
   setSkillSource,
   translateIntros
@@ -172,6 +173,12 @@ export function registerIpc(): void {
     return setSkillSource(loadConfig(), name.trim(), url.trim())
   })
 
+  /** GitHub 仓库搜索（来源索引自动补全） */
+  handle('skills:searchRepos', (keyword: string) => {
+    if (!keyword?.trim()) throw new Error('搜索关键词不能为空')
+    return searchRepos(loadConfig(), keyword.trim())
+  })
+
   // ---------- P6 更新检测 ----------
 
   handle('updates:checkSkills', () => checkSkillUpdates(loadConfig()))
@@ -200,11 +207,12 @@ export function registerIpc(): void {
 
   // ---------- P7 设置 / 主题 / 导入导出 ----------
 
-  /** 通用配置更新（ui / net 等浅合并字段）；更新后同步 nativeTheme */
+  /** 通用配置更新（ui / net / backup / sharedRoot 等浅合并字段）；更新后同步 nativeTheme */
   handle('config:update', (patch: Partial<AppConfig>) => {
     const config = loadConfig()
     if (patch.ui !== undefined) config.ui = { ...config.ui, ...patch.ui }
     if (patch.net !== undefined) config.net = { ...config.net, ...patch.net }
+    if (patch.backup !== undefined) config.backup = { ...config.backup, ...patch.backup }
     if (patch.sharedRoot !== undefined) {
       if (!patch.sharedRoot.trim()) throw new Error('共享库路径不能为空')
       config.sharedRoot = patch.sharedRoot.trim()

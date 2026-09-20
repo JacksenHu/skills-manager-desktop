@@ -335,6 +335,7 @@ export default function App() {
       {pending?.kind === 'create' && (
         <CreateConfirm
           plan={pending.plan}
+          backupEnabled={!!config?.backup?.enabled}
           busy={busy}
           onConfirm={() => void confirmPending()}
           onClose={() => setPending(null)}

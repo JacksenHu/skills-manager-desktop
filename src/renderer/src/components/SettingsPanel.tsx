@@ -49,9 +49,13 @@ export function SettingsPanel({
   const [version, setVersion] = useState('')
   const [configPath, setConfigPath] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
+  const [backupPath, setBackupPath] = useState(config?.backup?.path ?? '')
 
   useEffect(() => {
-    if (config) setSharedRoot(config.sharedRoot)
+    if (config) {
+      setSharedRoot(config.sharedRoot)
+      setBackupPath(config.backup?.path ?? '')
+    }
   }, [config])
 
   useEffect(() => {
@@ -210,6 +214,29 @@ export function SettingsPanel({
         />
       </Section>
 
+      {/* 接入备份 */}
+      <Section title="接入备份">
+        <Toggle
+          checked={config?.backup?.enabled ?? false}
+          onChange={(v) => void update({ backup: { enabled: v } }, v ? '已开启接入备份' : '已关闭接入备份')}
+          label="首次接入时备份原技能根目录"
+          hint="内容迁移进共享库之前，先整目录复制一份留底"
+        />
+        <input
+          value={backupPath}
+          onChange={(e) => setBackupPath(e.target.value)}
+          onBlur={() => {
+            if (backupPath.trim() !== (config?.backup?.path ?? ''))
+              void update({ backup: { path: backupPath.trim() } }, '备份路径已保存')
+          }}
+          placeholder="备份存放目录（绝对路径，如 D:\skills-backup）"
+          className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-sky-400 dark:border-slate-600"
+        />
+        <div className="text-xs text-slate-500 dark:text-slate-400">
+          备份到「{backupPath.trim() || '（未设置）'}」，备份名 = 技能根目录名-时间戳。备份失败会中止接入，不会动原目录。
+        </div>
+      </Section>
+
       {/* 网络 */}
       <Section title="网络与翻译">
         <div className="flex items-center gap-2">
@@ -285,6 +312,12 @@ export function SettingsPanel({
             v{version || '…'}
           </span>
         </div>
+        <button
+          onClick={() => void window.api.app.openPath('https://github.com/JacksenHu/skills-manager-desktop')}
+          className="text-xs text-sky-500 underline"
+        >
+          开源地址：github.com/JacksenHu/skills-manager-desktop
+        </button>
         <div className="text-xs text-slate-500 dark:text-slate-400">
           跨 Agent 技能共享库的桌面管理程序（Electron + React）。与 PowerShell 版 agent-skills-shared
           通过共享库目录与三张事实表数据耦合，逻辑独立实现。

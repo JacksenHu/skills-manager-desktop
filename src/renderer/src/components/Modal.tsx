@@ -31,7 +31,7 @@ export function Modal({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="px-5 py-4">{children}</div>
+        <div className="px-5 py-4 max-h-[70vh] overflow-auto">{children}</div>
       </div>
     </div>
   )
@@ -124,11 +124,13 @@ export function ResultModal({
 /** 接入确认：展示预案（迁移清单 / 冲突 / 同源多根警告） */
 export function CreateConfirm({
   plan,
+  backupEnabled,
   busy,
   onConfirm,
   onClose
 }: {
   plan: import('@shared/types').CreatePlan
+  backupEnabled?: boolean
   busy: boolean
   onConfirm: () => void
   onClose: () => void
@@ -161,24 +163,26 @@ export function CreateConfirm({
       {plan.scenario === 'real-dir' && plan.items.length > 0 && (
         <div className="rounded-lg bg-slate-50 p-3 dark:bg-slate-950">
           <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
-            将处理 {plan.items.length} 项内容：
+            将处理 {plan.items.length} 项内容{backupEnabled ? '（迁移前会先备份原技能根目录）' : '，迁移后原目录即拆除'}：
           </div>
-          {plan.items.map((it) => (
-            <div key={it.name} className="flex items-center justify-between font-mono text-xs">
-              <span className="truncate">{it.name}</span>
-              <span
-                className={
-                  it.action === 'conflict'
-                    ? 'text-red-400'
-                    : it.action === 'dedupe'
-                      ? 'text-amber-500'
-                      : 'text-emerald-500'
-                }
-              >
-                {it.action === 'move' ? '迁移' : it.action === 'dedupe' ? '去重删除' : '冲突·保留'}
-              </span>
-            </div>
-          ))}
+          <div className="max-h-52 overflow-auto">
+            {plan.items.map((it) => (
+              <div key={it.name} className="flex items-center justify-between font-mono text-xs">
+                <span className="truncate">{it.name}</span>
+                <span
+                  className={
+                    it.action === 'conflict'
+                      ? 'text-red-400'
+                      : it.action === 'dedupe'
+                        ? 'text-amber-500'
+                        : 'text-emerald-500'
+                  }
+                >
+                  {it.action === 'move' ? '迁移' : it.action === 'dedupe' ? '去重删除' : '冲突·保留'}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

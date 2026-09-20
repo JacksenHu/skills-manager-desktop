@@ -32,7 +32,8 @@ const api = {
     customCategories: () => ipcRenderer.invoke('skills:customCategories'),
     renameCategory: (from: string, to: string) =>
       ipcRenderer.invoke('skills:renameCategory', from, to),
-    setSource: (name: string, url: string) => ipcRenderer.invoke('skills:setSource', name, url)
+    setSource: (name: string, url: string) => ipcRenderer.invoke('skills:setSource', name, url),
+    searchRepos: (keyword: string) => ipcRenderer.invoke('skills:searchRepos', keyword)
   },
   updates: {
     checkSkills: () => ipcRenderer.invoke('updates:checkSkills'),

@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, write
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import extractZip from 'extract-zip'
-import type { AppConfig, OpResult, SkillInfo } from '@shared/types'
+import type { AppConfig, OpResult, RepoSearchResult, SkillInfo } from '@shared/types'
 import categoryDictJson from '@shared/data/category-dict.json'
 import { assertRealDir } from './junction-write'
 import { httpGet, httpGetJson, httpGetResponse, cjkRatio, translateDescription } from './translate'
@@ -673,4 +673,21 @@ export async function setSkillSource(config: AppConfig, name: string, url: strin
   const logs = [`[OK] ${name} 来源已设为 ${source}${branch ? `@${branch}` : ''}`]
   logs.push(commitSha ? `版本基准: ${commitSha.slice(0, 12)}（当前为最新，仓库有新提交时更新页会提示）` : '未能获取版本基准（仓库不可达？），更新页会显示[无基准]，可稍后重试')
   return { logs }
+}
+
+/** GitHub 仓库搜索（来源索引的自动补全；search API 匿名限速 10 次/分钟，有 token 更宽） */
+export async function searchRepos(config: AppConfig, keyword: string): Promise<RepoSearchResult[]> {
+  const kw = keyword.trim()
+  if (!kw) return []
+  const q = encodeURIComponent(kw)
+  const r = await httpGetJson<{ items?: { full_name: string; description: string | null; stargazers_count: number; html_url: string }[] }>(
+    `https://api.github.com/search/repositories?q=${q}&per_page=8&sort=stars`,
+    { headers: GH_HEADERS(config), timeoutMs: 20000, insecure: config.net?.allowInsecureTls ?? false }
+  )
+  return (r.items ?? []).map((i) => ({
+    repo: i.full_name,
+    description: (i.description ?? '').trim(),
+    stars: i.stargazers_count ?? 0,
+    url: i.html_url ?? `https://github.com/${i.full_name}`
+  }))
 }

@@ -12,7 +12,7 @@ import {
   rmSync,
   symlinkSync
 } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, basename } from 'node:path'
 import type {
   AppConfig,
   CreatePlan,
@@ -220,6 +220,20 @@ export function createJunction(path: string, config: AppConfig): JunctionOpResul
   }
 
   if (scenario === 'real-dir') {
+    // 接入备份（设置里开启时）：迁移前把原技能根整目录复制到备份目录
+    const backupCfg = config.backup
+    if (backupCfg?.enabled && backupCfg.path?.trim()) {
+      const stamp = new Date()
+        .toISOString()
+        .replace(/[-:T]/g, '')
+        .slice(0, 14)
+      const destRoot = join(backupCfg.path.trim(), `${basename(path)}-${stamp}`)
+      logs.push(`备份原技能根 -> ${destRoot}`)
+      mkdirSync(backupCfg.path.trim(), { recursive: true })
+      cpSync(path, destRoot, { recursive: true })
+      logs.push(`[OK] 备份完成（内容迁移前已留底）`)
+    }
+
     const children = readdirSync(path).sort()
     logs.push(`迁移 ${children.length} 项已有内容到共享库…`)
     let conflicted = 0
