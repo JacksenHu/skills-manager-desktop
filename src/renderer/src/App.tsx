@@ -489,12 +489,14 @@ function DetectPanel({
       {result && result.conflicts.length > 0 && (
         <div className="mb-4 rounded-lg bg-red-500/10 px-4 py-3 text-sm ring-1 ring-red-500/30">
           <div className="flex items-center gap-2 font-medium text-red-400">
-            「同一 Agent 多技能根」重复加载风险
+            重复加载风险：以下技能根指向同一目标
           </div>
           {result.conflicts.map((c) => (
             <div key={c.name} className="mt-2 text-slate-600 dark:text-slate-300">
               <div className="flex items-center gap-2">
-                <span className="text-amber-500">{c.name}</span> 可能被同一软件同时读取
+                <span className="truncate text-amber-500" title={c.name}>
+                  共同目标 {c.name}
+                </span>
                 {onMerge && (
                   <button
                     onClick={() => void onMerge(c.name)}
@@ -514,7 +516,7 @@ function DetectPanel({
             </div>
           ))}
           <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            归并 = 保留一个根接入共享库，其余拆联接后变空目录，消除重复加载。
+            这些技能根的最终目标相同，软件会把同一份技能加载多次。归并 = 保留一个根接入共享库，其余拆联接后变空目录，消除重复加载。
           </div>
         </div>
       )}

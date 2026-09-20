@@ -5,11 +5,7 @@ import { join } from 'node:path'
 import { configPath, loadConfig, saveConfig } from './services/config'
 import { listAgentStatus } from './services/agents'
 import { detectPresetAgents } from './services/detect'
-import {
-  detectDuplicateLoadRisks,
-  loadSameSourceGroups,
-  type VerifyVerdict
-} from './services/junction-state'
+import { detectDuplicateLoadRisks, type VerifyVerdict } from './services/junction-state'
 import {
   fetchHubCategories,
   fetchHubSkillDetail,
@@ -107,8 +103,11 @@ export function registerIpc(): void {
   handle('agents:detectPresets', () => {
     const config: AppConfig = loadConfig()
     const detected = detectPresetAgents(config)
-    // 重复加载风险：V2 目录段聚类（不同软件的专属目录不互报；通用根 .agents\skills 并存才报）
-    const conflicts = detectDuplicateLoadRisks(detected.map((d) => d.path), loadSameSourceGroups())
+    // 重复加载风险 V3：只有"绝对根"（联接最终目标 / 真实目录自身）相同的技能根
+    // 才算重复；不同软件的官方预设路径永不互报
+    const conflicts = detectDuplicateLoadRisks(
+      detected.map((d) => ({ path: d.path, target: d.target, state: d.state }))
+    )
     const FAILS: VerifyVerdict[] = ['fail-missing', 'fail-not-link', 'fail-wrong-target']
     const failCount = detected.filter((d) => FAILS.includes(d.state as VerifyVerdict)).length
     return { detected, conflicts, failCount }

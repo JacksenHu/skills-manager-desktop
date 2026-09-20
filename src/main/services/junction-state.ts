@@ -202,66 +202,37 @@ export function detectSameSourceConflicts(
 }
 
 /**
- * 重复加载风险检测 V2（UI 用；PS 对齐验收仍用上面的 V1）。
+ * 重复加载风险检测 V3（UI 用；PS 对齐验收仍用上面的 V1）。
  *
- * V1（PS 语义）把同组内任意两条路径都算重复——但组内可能混有多个软件的专属目录
- * （如 .codex\skills 与 .cursor\skills 属于不同软件，不会互相重复加载）。
- *
- * V2 目录段聚类规则：
- * - `*.agents\skills` 视为通用根：它与组内任何其他根并存都算重复（读通用目录的
- *   软件会同时读自己的专属根）
- * - 其余路径按"目录段"（命中 pattern 的固定首段，如 .codex / .cursor）聚类：
- *   同段 >= 2 条算重复（同软件多根），跨段不算
+ * 用户语义（0.2.7 重构）：只有"绝对根"（路径的最终解析目标）相同时才归为重复——
+ * - 联接指向同一目标（如多个技能根联接都指向共享库）→ 报（归并功能针对的场景）
+ * - 不同软件的不同官方预设路径（.claude\skills 与 .cursor\skills 等）→ 永不报
+ * same-source-groups 组概念不再参与重复判定。
  */
-export function detectDuplicateLoadRisks(
-  paths: string[],
-  groups: SameSourceGroup[]
-): { name: string; paths: string[] }[] {
-  const conflictPaths = paths.filter((p) => {
-    if (!existsSync(p)) return true
-    const stat = lstatSync(p)
-    if (stat.isSymbolicLink()) return true
-    try {
-      if (readdirSync(p).length === 0) {
-        return !matchSameSourceGroup(p, groups) // 已归并排除
-      }
-    } catch {
-      return true
-    }
-    return true
-  })
+export interface DuplicateLoadEntry {
+  path: string
+  /** 联接目标（state 为 active/other-link 时由 classifyJunction 提供） */
+  target?: string
+  state: string
+}
 
+export function detectDuplicateLoadRisks(entries: DuplicateLoadEntry[]): { name: string; paths: string[] }[] {
+  // 绝对根：active 联接取目标；real-dir 取路径本身。其余状态（missing/empty/
+  // merged-empty/not-dir/other-link/wrong-target）不参与——它们要么无实义，要么
+  // 本身是需人工处理的异常态。
+  const clusters = new Map<string, string[]>()
+  for (const e of entries) {
+    let root: string | null = null
+    if (e.state === 'active' && e.target) root = normalizeTarget(e.target)
+    else if (e.state === 'real-dir') root = normalizeTarget(e.path)
+    if (!root) continue
+    const list = clusters.get(root) ?? []
+    list.push(e.path)
+    clusters.set(root, list)
+  }
   const conflicts: { name: string; paths: string[] }[] = []
-  for (const g of groups) {
-    const hits = conflictPaths
-      .map((p) => ({ path: p, pattern: g.patterns.find((pat) => likeMatch(p.toLowerCase(), pat.toLowerCase())) }))
-      .filter((h) => h.pattern !== undefined)
-
-    // 目录段：通用根统一 '@general'；专属按 pattern 固定尾段的第一段目录名
-    const keyOf = (pattern: string, path: string): string => {
-      // 通用根：\agents\skills 或 .agents\skills（两种盘上形态）
-      if (/[\\.]agents[\\/]skills$/i.test(path)) return '@general'
-      const fixed = pattern.replace(/^\*/, '')
-      return (fixed.split('\\').filter(Boolean)[0] ?? fixed).toLowerCase()
-    }
-
-    const byKey = new Map<string, string[]>()
-    for (const h of hits) {
-      const k = keyOf(h.pattern!, h.path)
-      const list = byKey.get(k) ?? []
-      list.push(h.path)
-      byKey.set(k, list)
-    }
-
-    const general = byKey.get('@general') ?? []
-    const conflictSet = new Set<string>()
-    for (const [k, list] of byKey) {
-      if (k === '@general') continue
-      if (list.length >= 2) list.forEach((p) => conflictSet.add(p)) // 同段多根
-      if (general.length > 0) list.forEach((p) => conflictSet.add(p)) // 通用根并存
-    }
-    if (general.length > 0 && byKey.size > 1) general.forEach((p) => conflictSet.add(p))
-    if (conflictSet.size >= 2) conflicts.push({ name: g.name, paths: [...conflictSet] })
+  for (const [root, paths] of clusters) {
+    if (paths.length >= 2) conflicts.push({ name: root, paths })
   }
   return conflicts
 }
