@@ -202,12 +202,14 @@ export function detectSameSourceConflicts(
 }
 
 /**
- * 重复加载风险检测 V3（UI 用；PS 对齐验收仍用上面的 V1）。
+ * 重复加载风险检测 V4（UI 用；PS 对齐验收仍用上面的 V1）。
  *
- * 用户语义（0.2.7 重构）：只有"绝对根"（路径的最终解析目标）相同时才归为重复——
- * - 联接指向同一目标（如多个技能根联接都指向共享库）→ 报（归并功能针对的场景）
- * - 不同软件的不同官方预设路径（.claude\skills 与 .cursor\skills 等）→ 永不报
- * same-source-groups 组概念不再参与重复判定。
+ * 用户语义（0.2.8 二次澄清）：以技能根路径中**第一个点开头目录段**（`.xxxx`，即
+ * 软件专属目录，如 .claude / .cursor / .agents）为"绝对技能根"标识：
+ * - `.xxxx` 段重名（同一软件目录下出现多个技能根）→ 报
+ * - `.xxxx` 段不同（不同软件的官方预设路径，哪怕都是联接且指向同一目标）→ 永不报
+ * 无点段的路径（如 AppData 深层目录）以完整归一路径为标识（只与自己相同才报）。
+ * 仅 active / real-dir 两种状态参与；same-source-groups 不参与判定。
  */
 export interface DuplicateLoadEntry {
   path: string
@@ -217,22 +219,20 @@ export interface DuplicateLoadEntry {
 }
 
 export function detectDuplicateLoadRisks(entries: DuplicateLoadEntry[]): { name: string; paths: string[] }[] {
-  // 绝对根：active 联接取目标；real-dir 取路径本身。其余状态（missing/empty/
-  // merged-empty/not-dir/other-link/wrong-target）不参与——它们要么无实义，要么
-  // 本身是需人工处理的异常态。
   const clusters = new Map<string, string[]>()
   for (const e of entries) {
-    let root: string | null = null
-    if (e.state === 'active' && e.target) root = normalizeTarget(e.target)
-    else if (e.state === 'real-dir') root = normalizeTarget(e.path)
-    if (!root) continue
-    const list = clusters.get(root) ?? []
+    if (e.state !== 'active' && e.state !== 'real-dir') continue
+    const segs = normalizeTarget(e.path).split(/[\\/]/).filter(Boolean)
+    const dotSeg = segs.find((s) => s.startsWith('.'))
+    // 标识：点开头段（软件专属目录）；无点段则以完整路径为标识（只与自己聚簇）
+    const key = dotSeg ? dotSeg.toLowerCase() : normalizeTarget(e.path)
+    const list = clusters.get(key) ?? []
     list.push(e.path)
-    clusters.set(root, list)
+    clusters.set(key, list)
   }
   const conflicts: { name: string; paths: string[] }[] = []
-  for (const [root, paths] of clusters) {
-    if (paths.length >= 2) conflicts.push({ name: root, paths })
+  for (const [key, paths] of clusters) {
+    if (paths.length >= 2) conflicts.push({ name: key, paths })
   }
   return conflicts
 }
