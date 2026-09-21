@@ -122,6 +122,17 @@ export interface SkillInfo {
   package?: { marketplace: string; plugin: string; version?: string }
   /** false = 已停用（位于 skills-disabled 区，Agent 不加载） */
   enabled?: boolean
+  /** 技能归属：共享库本体，或某未接入 agent 的原生根 */
+  origin?: { kind: 'shared' | 'agent'; key: string; label: string }
+}
+
+/** 备份查询结果 */
+export interface BackupInfo {
+  exists: boolean
+  /** 备份目录绝对路径 */
+  dir?: string
+  createdAt?: string
+  sourcePath?: string
 }
 
 /** 技能套件市场来源（与 WorkBuddy known_marketplaces 对齐） */

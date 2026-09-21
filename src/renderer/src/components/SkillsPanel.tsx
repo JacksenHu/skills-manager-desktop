@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Boxes, FolderOpen, Info, Languages, Link2, Plus, RefreshCw, Route, Search, Sparkles, Tag, Tags, Trash2, X } from 'lucide-react'
+import { ArrowRightLeft, Boxes, FolderOpen, Info, Languages, Link2, Plus, RefreshCw, Route, Search, Sparkles, Tag, Tags, Trash2, X } from 'lucide-react'
 import type { AppConfig, IpcResult, OpResult, RepoSearchResult, RouterTarget, SkillInfo } from '@shared/types'
 import { ConfirmDialog, Modal, ResultModal, RouterConfirm } from './Modal'
 
@@ -123,6 +123,7 @@ export function SkillsPanel({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<string>('全部')
+  const [originFilter, setOriginFilter] = useState<string>('')
 
   // 操作流状态
   const [installOpen, setInstallOpen] = useState(false)
@@ -209,6 +210,9 @@ export function SkillsPanel({
 
   const visible = useMemo(() => {
     let list = filter === '全部' ? skills : skills.filter((s) => s.category === filter)
+    // 来源筛选（共享库 / 某 agent 原生根）
+    if (originFilter === 'shared') list = list.filter((s) => s.origin?.kind !== 'agent')
+    else if (originFilter) list = list.filter((s) => s.origin?.key === originFilter)
     const kw = keyword.trim().toLowerCase()
     if (kw) {
       const byName = config?.search?.name !== false
@@ -220,7 +224,37 @@ export function SkillsPanel({
       })
     }
     return list
-  }, [skills, filter, keyword, config])
+  }, [skills, filter, keyword, config, originFilter])
+
+  /** 来源筛选选项（未接入但根目录真实存在的 agent） */
+  const originOptions = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const s of skills) {
+      if (s.origin?.kind === 'agent') m.set(s.origin.key, s.origin.label)
+    }
+    return [...m.entries()]
+  }, [skills])
+
+  /** 共享库已有技能名（agent 技能迁移重名检测） */
+  const sharedNames = useMemo(
+    () => new Set(skills.filter((s) => s.origin?.kind !== 'agent').map((s) => s.name.toLowerCase())),
+    [skills]
+  )
+
+  /** 迁移 agent 技能到共享库 */
+  const migrate = useCallback(
+    async (s: SkillInfo) => {
+      if (!s.origin || s.origin.kind !== 'agent') return
+      const r = (await window.api.skills.migrateFromAgent(s.origin.key, s.name)) as IpcResult<OpResult>
+      if (!r.ok) {
+        setError(r.error)
+        return
+      }
+      setResult({ title: `迁移：${s.name}`, logs: r.data.logs })
+      void run()
+    },
+    [run]
+  )
 
   /** 套件分组（filter=套件 时的套件卡片网格数据） */
   const suiteGroups = useMemo(() => {
@@ -394,6 +428,48 @@ export function SkillsPanel({
         )}
       </div>
 
+      {/* 来源筛选（共享库 / 未接入但存在的 agent） */}
+      <div className="mb-4 flex flex-wrap items-center gap-1.5">
+        <span className="text-xs text-slate-400">来源</span>
+        <button
+          onClick={() => setOriginFilter('')}
+          className={
+            'rounded-full px-2.5 py-1 text-xs transition ' +
+            (originFilter === ''
+              ? 'bg-sky-500 text-white'
+              : 'bg-slate-200/70 text-slate-500 hover:bg-slate-300/70 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700')
+          }
+        >
+          全部来源
+        </button>
+        <button
+          onClick={() => setOriginFilter('shared')}
+          className={
+            'rounded-full px-2.5 py-1 text-xs transition ' +
+            (originFilter === 'shared'
+              ? 'bg-emerald-500 text-white'
+              : 'bg-slate-200/70 text-slate-500 hover:bg-slate-300/70 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700')
+          }
+        >
+          共享库技能
+        </button>
+        {originOptions.map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setOriginFilter(originFilter === key ? '' : key)}
+            title={`未接入的 agent「${label}」原生技能（可迁移进共享库）`}
+            className={
+              'rounded-full px-2.5 py-1 text-xs transition ' +
+              (originFilter === key
+                ? 'bg-blue-500 text-white'
+                : 'bg-slate-200/70 text-slate-500 hover:bg-slate-300/70 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700')
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* 路由技能提示条（明显提醒：需在会话中手动启用） */}
       {hasRouter && !routerTipDismissed && (
         <div className="mb-4 flex items-start gap-2 rounded-lg bg-sky-500/10 px-4 py-3 text-sm text-sky-600 ring-1 ring-sky-500/30 dark:text-sky-400">
@@ -474,7 +550,7 @@ export function SkillsPanel({
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {visible.map((s) => (
             <SkillCard
-              key={s.name}
+              key={`${s.origin?.kind ?? 'shared'}:${s.origin?.key ?? 'shared'}:${s.name}`}
               skill={s}
               busy={busy === 'translate-one'}
               onTranslate={() => {
@@ -491,6 +567,12 @@ export function SkillsPanel({
                 setSourceUrl(s.source ?? '')
               }}
               onToggle={() => void toggleEnabled(s)}
+              onMigrate={
+                s.origin?.kind === 'agent'
+                  ? () => void migrate(s)
+                  : undefined
+              }
+              sharedExists={s.origin?.kind === 'agent' ? sharedNames.has(s.name.toLowerCase()) : undefined}
             />
           ))}
         </div>
@@ -855,7 +937,9 @@ export function SkillsPanel({
               className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-xs outline-none focus:border-sky-400 dark:border-slate-600"
             />
             <div className="max-h-72 space-y-1 overflow-auto rounded-lg bg-slate-50 p-2 dark:bg-slate-950">
-              {skills.map((s) => (
+              {skills
+                .filter((s) => s.origin?.kind !== 'agent') // 组套件只针对共享库技能
+                .map((s) => (
                 <label
                   key={s.name}
                   className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -1054,7 +1138,9 @@ function SkillCard({
   onRemove,
   onCategory,
   onSource,
-  onToggle
+  onToggle,
+  onMigrate,
+  sharedExists
 }: {
   skill: SkillInfo
   busy: boolean
@@ -1063,9 +1149,14 @@ function SkillCard({
   onCategory: () => void
   onSource: () => void
   onToggle: () => void
+  /** agent 原生技能的「迁移到共享库」回调 */
+  onMigrate?: () => void
+  /** agent 技能与共享库重名（禁用迁移） */
+  sharedExists?: boolean
 }) {
   const intro = skill.introZh || skill.intro
   const enabled = skill.enabled !== false
+  const isAgentEntry = skill.origin?.kind === 'agent'
   return (
     <div
       className={
@@ -1077,6 +1168,19 @@ function SkillCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="truncate font-medium">{skill.name}</span>
+            {/* 归属标识：共享库（绿） / 某 agent（蓝） */}
+            {isAgentEntry ? (
+              <span
+                className="flex shrink-0 items-center gap-1 rounded bg-blue-500/15 px-1.5 py-0.5 text-[10px] text-blue-500"
+                title={`来自未接入 agent「${skill.origin?.label}」的原生技能`}
+              >
+                {skill.origin?.label}
+              </span>
+            ) : (
+              <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-500">
+                共享库
+              </span>
+            )}
             {skill.package && (
               <span
                 className="flex shrink-0 items-center gap-1 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] text-red-500"
@@ -1097,22 +1201,24 @@ function SkillCard({
             )}
           </div>
         </div>
-        {/* 启停开关：开=共享库启用（Agent 加载），关=移出共享库停用 */}
-        <button
-          onClick={onToggle}
-          title={enabled ? '已在共享库启用，点击停用（Agent 不再加载，数据保留）' : '已停用，点击启用（移回共享库）'}
-          className={
-            'relative h-5 w-9 shrink-0 rounded-full transition ' +
-            (enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600')
-          }
-        >
-          <span
+        {/* 启停开关：开=共享库启用（Agent 加载），关=移出共享库停用（agent 原生技能不适用） */}
+        {!isAgentEntry && (
+          <button
+            onClick={onToggle}
+            title={enabled ? '已在共享库启用，点击停用（Agent 不再加载，数据保留）' : '已停用，点击启用（移回共享库）'}
             className={
-              'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ' +
-              (enabled ? 'left-[18px]' : 'left-0.5')
+              'relative h-5 w-9 shrink-0 rounded-full transition ' +
+              (enabled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600')
             }
-          />
-        </button>
+          >
+            <span
+              className={
+                'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ' +
+                (enabled ? 'left-[18px]' : 'left-0.5')
+              }
+            />
+          </button>
+        )}
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${chipCls(skill.category)}`}>
           {skill.category}
         </span>
@@ -1146,48 +1252,68 @@ function SkillCard({
 
       <div className="mt-3 flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
         <div className="ml-auto flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
-          {!skill.introZh && (
-            <button
-              onClick={onTranslate}
-              disabled={busy}
-              title="翻译该技能简介为中文"
-              className="flex items-center gap-1 rounded px-2 py-1 hover:bg-sky-500/10 hover:text-sky-500 disabled:opacity-50"
-            >
-              <Languages className="h-3.5 w-3.5" />
-              翻译
-            </button>
+          {isAgentEntry ? (
+            onMigrate && (
+              <button
+                onClick={onMigrate}
+                disabled={sharedExists}
+                title={
+                  sharedExists
+                    ? '共享库已存在同名技能，请先处理重名'
+                    : '把该技能复制进共享库（agent 原副本保留）'
+                }
+                className="flex items-center gap-1 rounded bg-blue-500/10 px-2 py-1 text-blue-500 hover:bg-blue-500/20 disabled:opacity-50"
+              >
+                <ArrowRightLeft className="h-3.5 w-3.5" />
+                {sharedExists ? '已在共享库' : '迁移到共享库'}
+              </button>
+            )
+          ) : (
+            <>
+              {!skill.introZh && (
+                <button
+                  onClick={onTranslate}
+                  disabled={busy}
+                  title="翻译该技能简介为中文"
+                  className="flex items-center gap-1 rounded px-2 py-1 hover:bg-sky-500/10 hover:text-sky-500 disabled:opacity-50"
+                >
+                  <Languages className="h-3.5 w-3.5" />
+                  翻译
+                </button>
+              )}
+              <button
+                onClick={onSource}
+                title="设置开源仓库链接（建立版本基准，供更新检测）"
+                className="flex items-center gap-1 rounded px-2 py-1 hover:bg-sky-500/10 hover:text-sky-500"
+              >
+                <Link2 className="h-3.5 w-3.5" />
+                来源
+              </button>
+              <button
+                onClick={onCategory}
+                title="设置分类（手动分类优先于自动）"
+                className="flex items-center gap-1 rounded px-2 py-1 hover:bg-sky-500/10 hover:text-sky-500"
+              >
+                <Tag className="h-3.5 w-3.5" />
+                分类
+              </button>
+              <button
+                onClick={() => void window.api.app.openPath(skill.name)}
+                title="打开技能目录（在共享库中）"
+                className="rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={onRemove}
+                title="从共享库移除（永久删除）"
+                className="flex items-center gap-1 rounded px-2 py-1 hover:bg-red-500/10 hover:text-red-400"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                移除
+              </button>
+            </>
           )}
-          <button
-            onClick={onSource}
-            title="设置开源仓库链接（建立版本基准，供更新检测）"
-            className="flex items-center gap-1 rounded px-2 py-1 hover:bg-sky-500/10 hover:text-sky-500"
-          >
-            <Link2 className="h-3.5 w-3.5" />
-            来源
-          </button>
-          <button
-            onClick={onCategory}
-            title="设置分类（手动分类优先于自动）"
-            className="flex items-center gap-1 rounded px-2 py-1 hover:bg-sky-500/10 hover:text-sky-500"
-          >
-            <Tag className="h-3.5 w-3.5" />
-            分类
-          </button>
-          <button
-            onClick={() => void window.api.app.openPath(skill.name)}
-            title="打开技能目录（在共享库中）"
-            className="rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
-          >
-            <FolderOpen className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={onRemove}
-            title="从共享库移除（永久删除）"
-            className="flex items-center gap-1 rounded px-2 py-1 hover:bg-red-500/10 hover:text-red-400"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            移除
-          </button>
         </div>
       </div>
     </div>

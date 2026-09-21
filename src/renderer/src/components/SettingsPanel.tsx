@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Download, FolderOpen, Info, Plus, ShieldCheck, Trash2, Upload } from 'lucide-react'
+import { Download, FolderOpen, Info, ShieldCheck, Upload } from 'lucide-react'
 import type { AppConfig } from '@shared/types'
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -44,8 +44,6 @@ export function SettingsPanel({
   onConfigChanged: (config: AppConfig) => void
 }) {
   const [sharedRoot, setSharedRoot] = useState(config?.sharedRoot ?? '')
-  const [newKey, setNewKey] = useState('')
-  const [newPath, setNewPath] = useState('')
   const [version, setVersion] = useState('')
   const [configPath, setConfigPath] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
@@ -86,7 +84,6 @@ export function SettingsPanel({
 
   const theme = config?.ui?.theme ?? 'system'
   const closeToTray = config?.ui?.closeToTray !== false
-  const agents = Object.entries(config?.agents ?? {}).sort(([a], [b]) => a.localeCompare(b))
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">
@@ -124,67 +121,41 @@ export function SettingsPanel({
         </div>
       </Section>
 
-      {/* Agent 配置管理 */}
-      <Section title={`Agent 配置（${agents.length}）`}>
-        {agents.length > 0 && (
-          <div className="space-y-1.5">
-            {agents.map(([key, path]) => (
-              <div
-                key={key}
-                className="group flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-950"
-              >
-                <span className="shrink-0 rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] text-sky-500">
-                  {key}
-                </span>
-                <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-500 dark:text-slate-400">
-                  {path}
-                </span>
-                <button
-                  onClick={async () => {
-                    const r = await window.api.config.removeAgent(key)
-                    if (r.ok) onConfigChanged(r.data)
-                    setMsg(`已移除配置项「${key}」`)
-                  }}
-                  title="从配置移除（不动磁盘上的目录）"
-                  className="shrink-0 rounded p-1 text-slate-400 opacity-0 transition group-hover:opacity-100 hover:bg-red-500/10 hover:text-red-400"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+      {/* 接入备份（紧随共享库；Agent 配置已移至探测页「新建配置」） */}
+      <Section title="接入备份">
+        <Toggle
+          checked={config?.backup?.enabled ?? true}
+          onChange={(v) => void update({ backup: { enabled: v } }, v ? '已开启接入备份' : '已关闭接入备份')}
+          label="接入时自动备份原技能根目录"
+          hint="内容迁移进共享库之前，先整目录复制一份留底；拆除后可一键恢复"
+        />
         <div className="flex items-center gap-2">
           <input
-            value={newKey}
-            onChange={(e) => setNewKey(e.target.value)}
-            placeholder="标识名（如 claude-code）"
-            className="w-40 rounded-lg border border-slate-300 bg-transparent px-3 py-1.5 text-xs outline-none focus:border-sky-400 dark:border-slate-600"
-          />
-          <input
-            value={newPath}
-            onChange={(e) => setNewPath(e.target.value)}
-            placeholder="技能根路径（绝对路径）"
-            className="flex-1 rounded-lg border border-slate-300 bg-transparent px-3 py-1.5 font-mono text-xs outline-none focus:border-sky-400 dark:border-slate-600"
+            value={backupPath}
+            onChange={(e) => setBackupPath(e.target.value)}
+            onBlur={() => {
+              if (backupPath.trim() !== (config?.backup?.path ?? ''))
+                void update({ backup: { path: backupPath.trim() } }, '备份路径已保存')
+            }}
+            placeholder="备份存放目录（绝对路径）"
+            className="flex-1 rounded-lg border border-slate-300 bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-sky-400 dark:border-slate-600"
           />
           <button
             onClick={async () => {
-              if (!newKey.trim() || !newPath.trim()) return
-              const r = await window.api.config.upsertAgent(newKey.trim(), newPath.trim())
-              if (r.ok) onConfigChanged(r.data)
-              setMsg(`已添加「${newKey.trim()}」`)
-              setNewKey('')
-              setNewPath('')
+              const picked = (await window.api.app.pickDirectory('选择备份存放目录')) as string | null
+              if (picked) {
+                setBackupPath(picked)
+                void update({ backup: { path: picked } }, '备份路径已保存')
+              }
             }}
-            disabled={!newKey.trim() || !newPath.trim()}
-            title="添加 / 更新"
-            className="rounded-lg p-2 text-sky-500 hover:bg-sky-500/10 disabled:opacity-40"
+            title="选择目录"
+            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
           >
-            <Plus className="h-4 w-4" />
+            <FolderOpen className="h-4 w-4" />
           </button>
         </div>
         <div className="text-xs text-slate-500 dark:text-slate-400">
-          这里只管「配置表」。要为某个 Agent 建联接，去「探测」页点接入。
+          备份到「{backupPath.trim() || '（未设置，默认与共享库同父目录的 skills-backup）'}」，备份名 = 技能根目录名-时间戳。备份失败会中止接入，不会动原目录；拆除接入后可一键恢复。
         </div>
       </Section>
 
@@ -230,29 +201,6 @@ export function SettingsPanel({
         </div>
         <div className="text-xs text-slate-500 dark:text-slate-400">
           至少保留一项，否则技能库搜索框无结果。
-        </div>
-      </Section>
-
-      {/* 接入备份 */}
-      <Section title="接入备份">
-        <Toggle
-          checked={config?.backup?.enabled ?? false}
-          onChange={(v) => void update({ backup: { enabled: v } }, v ? '已开启接入备份' : '已关闭接入备份')}
-          label="首次接入时备份原技能根目录"
-          hint="内容迁移进共享库之前，先整目录复制一份留底"
-        />
-        <input
-          value={backupPath}
-          onChange={(e) => setBackupPath(e.target.value)}
-          onBlur={() => {
-            if (backupPath.trim() !== (config?.backup?.path ?? ''))
-              void update({ backup: { path: backupPath.trim() } }, '备份路径已保存')
-          }}
-          placeholder="备份存放目录（绝对路径，如 D:\skills-backup）"
-          className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-sky-400 dark:border-slate-600"
-        />
-        <div className="text-xs text-slate-500 dark:text-slate-400">
-          备份到「{backupPath.trim() || '（未设置）'}」，备份名 = 技能根目录名-时间戳。备份失败会中止接入，不会动原目录。
         </div>
       </Section>
 

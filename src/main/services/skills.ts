@@ -6,7 +6,7 @@ import type { AppConfig, OpResult, RepoSearchResult, RouterTarget, SkillInfo } f
 import categoryDictJson from '@shared/data/category-dict.json'
 import { assertRealDir } from './junction-write'
 import { classifyJunction, loadSameSourceGroups } from './junction-state'
-import { AGENT_PRESETS, expandPath } from './detect'
+import { detectPresetAgents, AGENT_PRESETS, expandPath } from './detect'
 import { httpGet, httpGetJson, httpGetResponse, cjkRatio, translateDescription } from './translate'
 
 /**
@@ -264,6 +264,66 @@ export function ungroupCustomPackage(config: AppConfig, packageName: string): Op
   if (count === 0) throw new Error(`自定义套件「${pkg}」不存在或没有成员`)
   logs.unshift(`[OK] 已解散自定义套件「${pkg}」（${count} 个成员）`)
   return { logs }
+}
+
+/**
+ * 技能库全量视图：共享库/停用区技能 + 未接入 agent 原生根里的技能（origin 标记）。
+ * 仅 skills:list IPC 使用——autoSource/ungroup/updates/Hub 等只认共享库的链路
+ * 仍直接用 listSkills。
+ */
+export function listSkillsWithOrigins(config: AppConfig): SkillInfo[] {
+  const shared = listSkills(config).map(
+    (s): SkillInfo => ({ ...s, origin: { kind: 'shared', key: 'shared', label: '共享库' } })
+  )
+  const sharedNames = new Set(shared.map((s) => s.name.toLowerCase()))
+  const out = [...shared]
+  for (const d of detectPresetAgents(config)) {
+    if (d.state !== 'real-dir') continue // 只收"未接入但目录真实存在"的 agent 原生根
+    const origin: NonNullable<SkillInfo['origin']> = {
+      kind: 'agent',
+      key: d.key,
+      label: d.presetLabel || d.label || d.key
+    }
+    for (const v of listVisibleSkills(d.path)) {
+      if (sharedNames.has(v.dir.toLowerCase())) continue // 与共享库同名不重复展示
+      out.push({
+        name: v.dir, // 目录名口径（与共享库一致）
+        category: v.category,
+        intro: v.intro,
+        introZh: v.introZh,
+        source: v.source,
+        branch: v.branch,
+        commitSha: v.commitSha,
+        installedAt: v.installedAt,
+        translatedAt: v.translatedAt,
+        version: v.version,
+        origin,
+        enabled: true
+      })
+    }
+  }
+  out.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+  return out
+}
+
+/** 把某 agent 原生根里的技能复制进共享库（copy 语义：agent 原副本保留） */
+export function migrateFromAgent(config: AppConfig, agentKey: string, skillDirName: string): OpResult {
+  const d = detectPresetAgents(config).find((x) => x.key === agentKey)
+  if (!d) throw new Error(`找不到 agent: ${agentKey}`)
+  if (d.state !== 'real-dir') throw new Error(`该 agent 根不是可迁移的真实目录（当前状态: ${d.state}）`)
+  const src = join(d.path, skillDirName)
+  if (!existsSync(join(src, 'SKILL.md'))) throw new Error(`agent 根里找不到技能: ${skillDirName}`)
+  const dest = join(config.sharedRoot, skillDirName)
+  if (existsSync(dest)) throw new Error(`共享库已存在同名技能「${skillDirName}」，请先处理重名`)
+  assertRealDir(src)
+  mkdirSync(config.sharedRoot, { recursive: true })
+  cpSync(src, dest, { recursive: true })
+  return {
+    logs: [
+      `[OK] ${skillDirName} 已从「${d.presetLabel || d.label}」（${agentKey}）复制进共享库`,
+      '     agent 原目录保留未动；该 agent 接入共享库时会自动去重'
+    ]
+  }
 }
 
 // ---------- 安装 ----------
@@ -602,7 +662,7 @@ export interface VisibleSkill extends SkillInfo {
 }
 
 /** 取某个入口的技能根路径：已配置优先，其次静态预设展开 */
-function agentRootOf(config: AppConfig, key: string): string | undefined {
+export function agentRootOf(config: AppConfig, key: string): string | undefined {
   const configured = config.agents[key]
   if (configured) return configured
   const preset = AGENT_PRESETS.find((p) => p.key === key)

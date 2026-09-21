@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { HardDrive, Link2, Monitor, Moon, RefreshCw, Search, Settings, Store, Sun } from 'lucide-react'
+import { FolderOpen, HardDrive, Link2, Monitor, Moon, Plus, RefreshCw, Search, Settings, Store, Sun } from 'lucide-react'
 import type {
   AgentStatus,
   AppConfig,
@@ -42,15 +42,14 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [editingAgent, setEditingAgent] = useState<{ key: string; path: string } | null>(null)
-  const [editKey, setEditKey] = useState('')
-  const [editPath, setEditPath] = useState('')
 
   // P4 操作流状态
   const [pending, setPending] = useState<Pending>(null)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ title: string; logs: string[] } | null>(null)
   const [refreshTick, setRefreshTick] = useState(0)
+  /** 拆除成功后发现的可用备份（提示用户是否恢复） */
+  const [restorePrompt, setRestorePrompt] = useState<{ path: string; dir: string } | null>(null)
 
   // 主题：偏好存配置（system/light/dark），system 跟随 prefers-color-scheme
   const [systemDark, setSystemDark] = useState(
@@ -170,6 +169,14 @@ export default function App() {
         const r = await window.api.junction.remove(pending.key)
         if (!r.ok) throw new Error(r.error)
         afterOp(`拆除结果：${pending.key}`, r.data)
+        // 拆除成功 → 查是否有接入备份，提示恢复
+        const b = (await window.api.backup.latest(pending.path)) as {
+          ok: boolean
+          data?: { exists: boolean; dir?: string }
+        }
+        if (b.ok && b.data?.exists && b.data.dir) {
+          setRestorePrompt({ path: pending.path, dir: b.data.dir })
+        }
       } else {
         const r = await window.api.junction.merge(pending.plan.name, pending.keepPath)
         if (!r.ok) throw new Error(r.error)
@@ -183,33 +190,58 @@ export default function App() {
     }
   }, [pending, afterOp])
 
-  /** 打开编辑弹窗（改配置键名 / 路径；只动配置表，不动磁盘联接） */
-  const startEditAgent = useCallback((key: string) => {
-    const agent = agents.find((a) => a.key === key)
-    if (!agent) return
-    setEditingAgent({ key, path: agent.path })
-    setEditKey(key)
-    setEditPath(agent.path)
-  }, [agents])
-
-  const confirmEditAgent = useCallback(async () => {
-    if (!editingAgent) return
-    const nk = editKey.trim()
-    const np = editPath.trim()
-    if (!nk || !np) return
-    try {
-      const up = await window.api.config.upsertAgent(nk, np)
-      if (!up.ok) throw new Error(up.error)
-      if (nk !== editingAgent.key) {
-        const rm = await window.api.config.removeAgent(editingAgent.key)
-        if (!rm.ok) throw new Error(rm.error)
+  /** 探测卡片 inline 编辑保存：改名 = upsert 新键 + 删旧键；未配置预设保存即创建配置 */
+  const saveEditAgent = useCallback(
+    async (oldKey: string, newKey: string, newPath: string) => {
+      try {
+        const up = await window.api.config.upsertAgent(newKey, newPath)
+        if (!up.ok) throw new Error(up.error)
+        if (newKey !== oldKey) {
+          const rm = await window.api.config.removeAgent(oldKey)
+          if (!rm.ok) throw new Error(rm.error)
+        }
+        await refresh()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
       }
-      setEditingAgent(null)
-      await refresh()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }, [editingAgent, editKey, editPath, refresh])
+    },
+    [refresh]
+  )
+
+  /** 恢复备份（AgentCard 按钮入口；hasBackup=false 时提示） */
+  const restoreAgentBackup = useCallback(
+    (path: string, hasBackup: boolean) => {
+      if (!hasBackup) {
+        setError('未找到该技能根的接入备份（可能从未接入过，或备份已关闭）')
+        return
+      }
+      setPendingRestore(path)
+    },
+    []
+  )
+  const [pendingRestore, setPendingRestore] = useState<string | null>(null)
+
+  const confirmRestore = useCallback(
+    async (path: string) => {
+      setBusy(true)
+      try {
+        const r = (await window.api.backup.restore(path)) as {
+          ok: boolean
+          data?: { logs: string[] }
+          error?: string
+        }
+        if (!r.ok) throw new Error(r.error ?? '恢复失败')
+        setResult({ title: '恢复备份结果', logs: r.data?.logs ?? [] })
+        await refresh()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setBusy(false)
+        setPendingRestore(null)
+      }
+    },
+    [refresh]
+  )
 
   return (
     <div className="flex h-screen flex-col bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
@@ -307,7 +339,8 @@ export default function App() {
                     agent={a}
                     onConnect={startConnect}
                     onRemove={startRemove}
-                    onEdit={startEditAgent}
+                    onSaveEdit={saveEditAgent}
+                    onRestore={restoreAgentBackup}
                   />
                 ))}
                 {linkedUnconfigured.map((d) => (
@@ -325,7 +358,9 @@ export default function App() {
             onConnect={startConnect}
             onRemove={startRemove}
             onMerge={startMerge}
-            onEdit={startEditAgent}
+            onSaveEdit={saveEditAgent}
+            onRestore={restoreAgentBackup}
+            onAgentsChanged={() => void refresh()}
           />
         )}
 
@@ -388,31 +423,36 @@ export default function App() {
         </Modal>
       )}
 
-      {/* 编辑 Agent 配置（标识名 / 路径） */}
-      {editingAgent && (
+      {/* 拆除后恢复备份确认 */}
+      {restorePrompt && (
         <ConfirmDialog
-          title={`编辑 Agent 配置：${editingAgent.key}`}
-          confirmLabel="保存"
-          busy={false}
-          onConfirm={() => void confirmEditAgent()}
-          onClose={() => setEditingAgent(null)}
+          title="检测到接入备份"
+          confirmLabel="恢复备份"
+          busy={busy}
+          onConfirm={() => void confirmRestore(restorePrompt.path)}
+          onClose={() => setRestorePrompt(null)}
         >
-          <div className="space-y-2">
-            <input
-              value={editKey}
-              onChange={(e) => setEditKey(e.target.value)}
-              placeholder="标识名"
-              className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-sky-400 dark:border-slate-600"
-            />
-            <input
-              value={editPath}
-              onChange={(e) => setEditPath(e.target.value)}
-              placeholder="技能根路径"
-              className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-sky-400 dark:border-slate-600"
-            />
+          <code className="block break-all rounded bg-slate-100 px-2 py-1 text-xs dark:bg-slate-800">
+            {restorePrompt.dir}
+          </code>
+          <div className="text-slate-600 dark:text-slate-300">
+            该技能根在接入前有自动备份。恢复会把备份还原为真实技能根（当前联接已拆除，共享库数据不受影响）。
           </div>
-          <div className="text-xs text-slate-500 dark:text-slate-400">
-            只修改配置表，不动磁盘上的联接。改路径后旧路径的联接仍在原处（可在「探测」页处理）；改标识名会移除旧配置项。
+        </ConfirmDialog>
+      )}
+
+      {/* 恢复备份确认（AgentCard「恢复备份」按钮） */}
+      {pendingRestore && (
+        <ConfirmDialog
+          title={`恢复备份：${pendingRestore}`}
+          confirmLabel="确认恢复"
+          danger
+          busy={busy}
+          onConfirm={() => void confirmRestore(pendingRestore)}
+          onClose={() => setPendingRestore(null)}
+        >
+          <div className="text-slate-600 dark:text-slate-300">
+            将用最近一次接入备份还原该技能根为真实目录。若它当前是联接会先拆除（共享库数据不动）；若是非空真实目录会被拒绝。
           </div>
         </ConfirmDialog>
       )}
@@ -427,18 +467,25 @@ function DetectPanel({
   onConnect,
   onRemove,
   onMerge,
-  onEdit
+  onSaveEdit,
+  onRestore,
+  onAgentsChanged
 }: {
   sharedRoot: string
   refreshTick: number
   onConnect: (key: string, path: string, dynamic?: boolean) => void
   onRemove: (key: string) => void
   onMerge: (groupName: string) => void
-  onEdit: (key: string) => void
+  onSaveEdit: (oldKey: string, newKey: string, newPath: string) => void
+  onRestore: (path: string, hasBackup: boolean) => void
+  onAgentsChanged: () => void
 }) {
   const [result, setResult] = useState<DetectPresetsResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [newKey, setNewKey] = useState('')
+  const [newPath, setNewPath] = useState('')
 
   const run = useCallback(async () => {
     setLoading(true)
@@ -471,14 +518,87 @@ function DetectPanel({
           {result ? `已接入 ${active} / 已配置 ${configured} / 共 ${result.detected.length} 条入口` : '探测中…'}
         </span>
         <button
+          onClick={() => setCreateOpen(true)}
+          title="新建自定义 Agent 配置（名称 + 技能根路径）"
+          className="ml-auto flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-1.5 text-sm text-emerald-500 transition hover:bg-emerald-500/20"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          新建配置
+        </button>
+        <button
           onClick={() => void run()}
           disabled={loading}
-          className="ml-auto flex items-center gap-1.5 rounded-lg bg-sky-500/10 px-3 py-1.5 text-sm text-sky-500 transition hover:bg-sky-500/20 disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-lg bg-sky-500/10 px-3 py-1.5 text-sm text-sky-500 transition hover:bg-sky-500/20 disabled:opacity-50"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
           重新探测
         </button>
       </div>
+
+      {/* 新建配置弹窗 */}
+      {createOpen && (
+        <Modal
+          title="新建 Agent 配置"
+          onClose={() => setCreateOpen(false)}
+        >
+          <div className="space-y-2.5 text-sm">
+            <input
+              value={newKey}
+              onChange={(e) => setNewKey(e.target.value)}
+              placeholder="标识名（如 my-agent）"
+              className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-xs outline-none focus:border-sky-400 dark:border-slate-600"
+            />
+            <div className="flex items-center gap-2">
+              <input
+                value={newPath}
+                onChange={(e) => setNewPath(e.target.value)}
+                placeholder="技能根路径（绝对路径）"
+                className="flex-1 rounded-lg border border-slate-300 bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-sky-400 dark:border-slate-600"
+              />
+              <button
+                onClick={async () => {
+                  const picked = (await window.api.app.pickDirectory('选择技能根目录')) as string | null
+                  if (picked) setNewPath(picked)
+                }}
+                title="选择目录"
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-800"
+              >
+                <FolderOpen className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              只写配置表。要建立联接（接入共享库），保存后在卡片上点「接入」。
+            </div>
+          </div>
+          <div className="mt-5 flex justify-end gap-2">
+            <button
+              onClick={() => setCreateOpen(false)}
+              className="rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+            >
+              取消
+            </button>
+            <button
+              onClick={async () => {
+                if (!newKey.trim() || !newPath.trim()) return
+                const r = await window.api.config.upsertAgent(newKey.trim(), newPath.trim())
+                if (r.ok) {
+                  setCreateOpen(false)
+                  setNewKey('')
+                  setNewPath('')
+                  onAgentsChanged()
+                  void run()
+                } else {
+                  setError(r.error)
+                }
+              }}
+              disabled={!newKey.trim() || !newPath.trim()}
+              className="rounded-lg bg-sky-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-600 disabled:opacity-50"
+            >
+              保存配置
+            </button>
+          </div>
+        </Modal>
+      )}
 
       {error && (
         <div className="mb-4 rounded-lg bg-red-500/10 px-4 py-3 text-sm text-red-400 ring-1 ring-red-500/30">
@@ -529,7 +649,8 @@ function DetectPanel({
               agent={d}
               onConnect={onConnect}
               onRemove={onRemove}
-              onEdit={onEdit}
+              onSaveEdit={onSaveEdit}
+              onRestore={onRestore}
             />
           ))}
         </div>

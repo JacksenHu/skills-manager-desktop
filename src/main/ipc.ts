@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { configPath, loadConfig, saveConfig } from './services/config'
+import { backupLatest, restoreBackup } from './services/backup'
 import { listAgentStatus } from './services/agents'
 import { detectPresetAgents } from './services/detect'
 import { detectDuplicateLoadRisks, type VerifyVerdict } from './services/junction-state'
@@ -36,7 +37,9 @@ import {
   generateRouter,
   installSkills,
   listSkills,
+  listSkillsWithOrigins,
   listCustomCategories,
+  migrateFromAgent,
   removeSkill,
   renameCategory,
   resolveRouterTargets,
@@ -150,7 +153,7 @@ export function registerIpc(): void {
 
   // ---------- P5 技能库：列表 / 安装 / 移除 / 翻译 / 路由 ----------
 
-  handle('skills:list', () => listSkills(loadConfig()))
+  handle('skills:list', () => listSkillsWithOrigins(loadConfig()))
 
   /** 安装：GitHub / owner/repo / skills.sh 链接；replace=true 时同名技能替换为仓库版本 */
   handle('skills:install', (url: string, replace: boolean) => {
@@ -343,6 +346,12 @@ export function registerIpc(): void {
     return toggleSkillEnabled(loadConfig(), name.trim(), Boolean(enabled))
   })
 
+  /** 把某 agent 原生根里的技能复制进共享库（copy 语义，原副本保留） */
+  handle('skills:migrateFromAgent', (agentKey: string, skillDirName: string) => {
+    if (!agentKey?.trim() || !skillDirName?.trim()) throw new Error('参数不能为空')
+    return migrateFromAgent(loadConfig(), agentKey.trim(), skillDirName.trim())
+  })
+
   /** 组自定义套件：勾选技能统一打套件标记 */
   handle('skills:groupPackage', (packageName: string, members: string[]) => {
     if (!packageName?.trim()) throw new Error('套件名不能为空')
@@ -453,5 +462,25 @@ export function registerIpc(): void {
   handle('shell:openPath', async (path: string) => {
     const result = await shell.openPath(path)
     return result === '' ? { opened: true } : { opened: false, message: result }
+  })
+
+  // 目录选择对话框（备份路径 / 新建 Agent 配置等）
+  handle('dialog:pickDirectory', async (title?: string) => {
+    const result = await dialog.showOpenDialog({
+      title: title?.trim() || '选择目录',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+  })
+
+  // 接入备份：查询最近备份 / 恢复
+  handle('backup:latest', (path: string) => {
+    if (!path?.trim()) throw new Error('路径不能为空')
+    return backupLatest(path.trim(), loadConfig())
+  })
+
+  handle('backup:restore', (path: string) => {
+    if (!path?.trim()) throw new Error('路径不能为空')
+    return restoreBackup(path.trim(), loadConfig())
   })
 }

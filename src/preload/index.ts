@@ -38,6 +38,8 @@ const api = {
     autoSource: (name: string) => ipcRenderer.invoke('skills:autoSource', name),
     autoSourceAll: () => ipcRenderer.invoke('skills:autoSourceAll'),
     toggle: (name: string, enabled: boolean) => ipcRenderer.invoke('skills:toggle', name, enabled),
+    migrateFromAgent: (agentKey: string, skillDirName: string) =>
+      ipcRenderer.invoke('skills:migrateFromAgent', agentKey, skillDirName),
     groupPackage: (packageName: string, members: string[]) =>
       ipcRenderer.invoke('skills:groupPackage', packageName, members),
     ungroupPackage: (packageName: string) => ipcRenderer.invoke('skills:ungroupPackage', packageName)
@@ -73,7 +75,12 @@ const api = {
   },
   app: {
     version: () => ipcRenderer.invoke('app:getVersion'),
-    openPath: (path: string) => ipcRenderer.invoke('shell:openPath', path)
+    openPath: (path: string) => ipcRenderer.invoke('shell:openPath', path),
+    pickDirectory: (title?: string) => ipcRenderer.invoke('dialog:pickDirectory', title)
+  },
+  backup: {
+    latest: (path: string) => ipcRenderer.invoke('backup:latest', path),
+    restore: (path: string) => ipcRenderer.invoke('backup:restore', path)
   },
   settings: {
     update: (patch: unknown) => ipcRenderer.invoke('config:update', patch),

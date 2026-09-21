@@ -11,11 +11,14 @@ export function configPath(): string {
 }
 
 export function defaultConfig(): AppConfig {
+  const sharedRoot = join(homedir(), 'skills', 'shared')
   return {
-    sharedRoot: join(homedir(), 'skills', 'shared'),
+    sharedRoot,
     agents: {},
     ui: { theme: 'system' },
-    net: {}
+    net: {},
+    // 接入备份默认开启，备份区与共享库同父目录（默认同盘，复制可靠）
+    backup: { enabled: true, path: join(dirname(sharedRoot), 'skills-backup') }
   }
 }
 
@@ -24,7 +27,13 @@ export function loadConfig(): AppConfig {
   if (!existsSync(p)) return defaultConfig()
   try {
     const parsed = JSON.parse(readFileSync(p, 'utf8')) as Partial<AppConfig>
-    return { ...defaultConfig(), ...parsed, ui: { ...defaultConfig().ui, ...(parsed.ui ?? {}) } }
+    return {
+      ...defaultConfig(),
+      ...parsed,
+      ui: { ...defaultConfig().ui, ...(parsed.ui ?? {}) },
+      // backup 深合并：老配置里 backup:{enabled:false}（无 path）不吃掉默认路径
+      backup: { ...defaultConfig().backup, ...(parsed.backup ?? {}) }
+    }
   } catch {
     // 配置文件损坏时回退默认值，不阻断启动
     return defaultConfig()

@@ -1,4 +1,5 @@
-import { FolderOpen, Link2Off, Pencil, Plug } from 'lucide-react'
+import { useState } from 'react'
+import { FolderOpen, Link2Off, Pencil, Plug, RotateCcw, Save, X } from 'lucide-react'
 import type { AgentStatus, JunctionState } from '@shared/types'
 
 export const STATE_META: Record<JunctionState, { label: string; cls: string }> = {
@@ -17,42 +18,106 @@ export function AgentCard({
   agent,
   onConnect,
   onRemove,
-  onEdit
+  onSaveEdit,
+  onRestore
 }: {
   agent: AgentStatus & { presetLabel?: string; configured?: boolean; dynamic?: boolean }
   onConnect?: (key: string, path: string, dynamic?: boolean) => void
   onRemove?: (key: string) => void
-  onEdit?: (key: string) => void
+  /** inline 编辑保存：改名 = upsert 新键 + 删旧键；未配置预设项保存即创建自定义配置 */
+  onSaveEdit?: (oldKey: string, newKey: string, newPath: string) => void
+  /** 恢复备份（hasBackup=false 时调用方提示未找到备份） */
+  onRestore?: (path: string, hasBackup: boolean) => void
 }) {
   const meta = STATE_META[agent.state]
+  const [editing, setEditing] = useState(false)
+  const [editKey, setEditKey] = useState(agent.key)
+  const [editPath, setEditPath] = useState(agent.path)
+  const [checkingRestore, setCheckingRestore] = useState(false)
+
   // 活跃但未配置的入口（如历史联接）也允许"接入"——预案会识别为 already-active，只写配置
   const canConnect =
     onConnect && (CAN_CONNECT.includes(agent.state) || (agent.state === 'active' && agent.configured === false))
   const canRemove = onRemove && agent.state === 'active' && agent.configured
 
+  const saveEdit = () => {
+    const nk = editKey.trim()
+    const np = editPath.trim()
+    if (!nk || !np) return
+    onSaveEdit?.(agent.key, nk, np)
+    setEditing(false)
+  }
+
+  const askRestore = async () => {
+    setCheckingRestore(true)
+    try {
+      const r = (await window.api.backup.latest(agent.path)) as { ok: boolean; data?: { exists: boolean } }
+      onRestore?.(agent.path, Boolean(r.ok && r.data?.exists))
+    } finally {
+      setCheckingRestore(false)
+    }
+  }
+
   return (
     <div className="group rounded-xl border border-slate-200 bg-white p-4 transition hover:border-sky-400/60 dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 truncate font-medium">
-            {agent.presetLabel ?? agent.label}
-            {agent.configured !== undefined && (
-              <span
-                className={
-                  'shrink-0 rounded px-1.5 py-0.5 text-[10px] ' +
-                  (agent.configured
-                    ? 'bg-sky-500/15 text-sky-500'
-                    : 'bg-slate-500/10 text-slate-400')
-                }
+      {editing ? (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <input
+              value={editKey}
+              onChange={(e) => setEditKey(e.target.value)}
+              placeholder="标识名（如 claude-code）"
+              className="w-36 rounded-lg border border-sky-400 bg-transparent px-2.5 py-1.5 text-xs outline-none dark:border-sky-600"
+            />
+            <span className="text-[10px] text-slate-400">标识名 / 路径</span>
+            <div className="ml-auto flex gap-1">
+              <button
+                onClick={saveEdit}
+                title="保存配置"
+                className="rounded p-1.5 text-emerald-500 hover:bg-emerald-500/10"
               >
-                {agent.configured ? '已配置' : '未配置'}
-              </span>
-            )}
+                <Save className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => setEditing(false)}
+                title="取消"
+                className="rounded p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
-          <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{agent.path}</div>
+          <input
+            value={editPath}
+            onChange={(e) => setEditPath(e.target.value)}
+            placeholder="技能根路径（绝对路径）"
+            className="w-full rounded-lg border border-sky-400 bg-transparent px-2.5 py-1.5 font-mono text-xs outline-none dark:border-sky-600"
+          />
+          <div className="text-[10px] text-slate-400">
+            只写配置表，不动磁盘联接。改标识名会移除旧配置项；未配置预设保存后即成为自定义配置。
+          </div>
         </div>
-        <span className={`rounded-full px-2 py-0.5 text-xs ring-1 ${meta.cls}`}>{meta.label}</span>
-      </div>
+      ) : (
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 truncate font-medium">
+              {agent.presetLabel ?? agent.label}
+              {agent.configured !== undefined && (
+                <span
+                  className={
+                    'shrink-0 rounded px-1.5 py-0.5 text-[10px] ' +
+                    (agent.configured ? 'bg-sky-500/15 text-sky-500' : 'bg-slate-500/10 text-slate-400')
+                  }
+                >
+                  {agent.configured ? '已配置' : '未配置'}
+                </span>
+              )}
+            </div>
+            <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{agent.path}</div>
+          </div>
+          <span className={`rounded-full px-2 py-0.5 text-xs ring-1 ${meta.cls}`}>{meta.label}</span>
+        </div>
+      )}
 
       <div className="mt-3 flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
         <span>
@@ -64,7 +129,7 @@ export function AgentCard({
         </span>
 
         <div className="ml-auto flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
-          {canConnect && (
+          {canConnect && !editing && (
             <button
               onClick={() => onConnect?.(agent.key, agent.path)}
               title={
@@ -78,23 +143,38 @@ export function AgentCard({
               接入
             </button>
           )}
-          {canRemove && (
+          {canRemove && !editing && (
             <button
               onClick={() => onRemove?.(agent.key)}
-              title="拆除联接（共享库数据保留）"
+              title="拆除联接（共享库数据保留，可恢复备份）"
               className="flex items-center gap-1 rounded px-2 py-1 hover:bg-red-500/10 hover:text-red-400"
             >
               <Link2Off className="h-3.5 w-3.5" />
               拆除
             </button>
           )}
-          {agent.state === 'other-link' && (
+          {onRestore && !editing && (
+            <button
+              onClick={() => void askRestore()}
+              disabled={checkingRestore}
+              title="恢复最近一次接入备份（原技能根还原为真实目录）"
+              className="flex items-center gap-1 rounded px-2 py-1 hover:bg-amber-500/10 hover:text-amber-500 disabled:opacity-50"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              恢复备份
+            </button>
+          )}
+          {agent.state === 'other-link' && !editing && (
             <span className="text-red-400/80">联接指向别处，请人工处理</span>
           )}
-          {onEdit && agent.configured && (
+          {onSaveEdit && !editing && (
             <button
-              onClick={() => onEdit(agent.key)}
-              title="修改标识名 / 路径（只改配置）"
+              onClick={() => {
+                setEditKey(agent.key)
+                setEditPath(agent.path)
+                setEditing(true)
+              }}
+              title="修改标识名 / 路径（只写配置表）"
               className="flex items-center gap-1 rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-800"
             >
               <Pencil className="h-3.5 w-3.5" />

@@ -28,6 +28,10 @@ import {
   likeMatch,
   loadSameSourceGroups
 } from './junction-state'
+import { assertRealDir, isJunction, junctionTarget } from './fs-guards'
+import { createBackup } from './backup'
+
+export { assertRealDir } from './fs-guards'
 import { toJunctionState } from './state-map'
 
 /**
@@ -44,37 +48,6 @@ import { toJunctionState } from './state-map'
 
 export interface JunctionOpResult {
   logs: string[]
-}
-
-function isJunction(path: string): boolean {
-  try {
-    return lstatSync(path).isSymbolicLink()
-  } catch {
-    return false
-  }
-}
-
-function junctionTarget(path: string): string {
-  try {
-    return readlinkSync(path)
-  } catch {
-    return ''
-  }
-}
-
-/**
- * 递归删除前的安全守卫：目标必须是真实目录（不是联接/符号链接）。
- * 违反即抛错 —— 宁可失败也绝不穿透联接删共享库。
- * 全项目唯一允许递归删除的入口：任何 rmSync(recursive) 前必须先过这里。
- */
-export function assertRealDir(path: string): void {
-  const st = lstatSync(path)
-  if (st.isSymbolicLink()) {
-    throw new Error(`安全守卫：${path} 是联接，禁止递归删除（会穿透到共享库）`)
-  }
-  if (!st.isDirectory()) {
-    throw new Error(`安全守卫：${path} 不是目录，禁止递归删除`)
-  }
 }
 
 /**
@@ -220,19 +193,10 @@ export function createJunction(path: string, config: AppConfig): JunctionOpResul
   }
 
   if (scenario === 'real-dir') {
-    // 接入备份（设置里开启时）：迁移前把原技能根整目录复制到备份目录
-    const backupCfg = config.backup
-    if (backupCfg?.enabled && backupCfg.path?.trim()) {
-      const stamp = new Date()
-        .toISOString()
-        .replace(/[-:T]/g, '')
-        .slice(0, 14)
-      const destRoot = join(backupCfg.path.trim(), `${basename(path)}-${stamp}`)
-      logs.push(`备份原技能根 -> ${destRoot}`)
-      mkdirSync(backupCfg.path.trim(), { recursive: true })
-      cpSync(path, destRoot, { recursive: true })
-      logs.push(`[OK] 备份完成（内容迁移前已留底）`)
-    }
+    // 接入备份（默认开启，设置里可关）：迁移前把原技能根整目录留底；失败即中止接入
+    const backupDir = createBackup(path, config)
+    if (backupDir) logs.push(`备份原技能根 -> ${backupDir}（内容迁移前已留底）`)
+    else logs.push('备份已关闭（设置→接入备份），跳过留底')
 
     const children = readdirSync(path).sort()
     logs.push(`迁移 ${children.length} 项已有内容到共享库…`)
