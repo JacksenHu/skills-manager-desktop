@@ -65,22 +65,6 @@ const api = {
     install: (slug: string, namespace: string, replace?: boolean) =>
       ipcRenderer.invoke('hub:install', slug, namespace, replace)
   },
-  /**
-   * SkillsBot（skillsbot.cn）平台，全程免登录。
-   * 技能 id 一律按字符串传递：19 位雪花 ID 经 Number 转换会丢精度，导致详情/安装 404。
-   */
-  bot: {
-    bootstrap: (type?: 1 | 2) => ipcRenderer.invoke('bot:bootstrap', type),
-    categories: (type?: 1 | 2) => ipcRenderer.invoke('bot:categories', type),
-    listByCategory: (opts: { categoryId: number | string; page?: number; type?: 1 | 2 }) =>
-      ipcRenderer.invoke('bot:listByCategory', opts),
-    search: (opts: { keyword: string; page?: number; type?: 1 | 2 }) =>
-      ipcRenderer.invoke('bot:search', opts),
-    hot: (type?: 1 | 2) => ipcRenderer.invoke('bot:hot', type),
-    newest: (type?: 1 | 2) => ipcRenderer.invoke('bot:new', type),
-    detail: (id: string) => ipcRenderer.invoke('bot:detail', id),
-    install: (id: string, opts?: { replace?: boolean }) => ipcRenderer.invoke('bot:install', id, opts)
-  },
   updates: {
     checkSkills: () => ipcRenderer.invoke('updates:checkSkills'),
     updateSkills: (repos: string[]) => ipcRenderer.invoke('updates:updateSkills', repos),

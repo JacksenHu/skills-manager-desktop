@@ -1,6 +1,6 @@
 {
   "name": "skills-manager-desktop",
-  "version": "0.4.1",
+  "version": "0.4.0",
   "description": "跨 Agent 技能共享库的桌面管理程序：Junction 联接 / 技能库 / 更新检测 / 托盘",
   "main": "./out/main/index.js",
   "scripts": {
@@ -16,9 +16,7 @@
     "verify:p4": "node scripts/p4-smoke.mjs",
     "verify:p5": "node scripts/p5-smoke.mjs",
     "verify:p6": "node scripts/p6-smoke.mjs",
-    "verify:p12": "node scripts/p12-smoke.mjs",
-    "verify:p12:live": "node scripts/p12-smoke.mjs && node scripts/p12-live-check.mjs",
-    "verify:all": "node scripts/check-changelog.mjs && node scripts/check-tables.mjs && node scripts/verify-alignment.mjs && node scripts/p4-smoke.mjs && node scripts/p5-smoke.mjs && node scripts/p6-smoke.mjs && node scripts/p12-smoke.mjs"
+    "verify:all": "node scripts/check-changelog.mjs && node scripts/check-tables.mjs && node scripts/verify-alignment.mjs && node scripts/p4-smoke.mjs && node scripts/p5-smoke.mjs && node scripts/p6-smoke.mjs"
   },
   "author": "JacksenHu",
   "license": "MIT",
