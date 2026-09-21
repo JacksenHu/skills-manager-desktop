@@ -50,7 +50,17 @@ import {
 } from './services/skills'
 import { checkSkillUpdates, checkToolUpdate, fetchToolReleases, updateSkills } from './services/updates'
 import { downloadUpdate, installUpdate } from './services/updater'
-import type { AppConfig, IpcResult } from '@shared/types'
+import {
+  BotApiError,
+  fetchBotCategories,
+  fetchBotHot,
+  fetchBotNew,
+  fetchBotSkillDetail,
+  installBotSkillNoAuth,
+  listBotSkillsByCategory,
+  searchBotSkills
+} from './services/skillsbot'
+import type { AppConfig, BotInstallOptions, IpcResult } from '@shared/types'
 
 function ok<T>(data: T): IpcResult<T> {
   return { ok: true, data }
@@ -66,6 +76,23 @@ function handle<T>(channel: string, fn: (...args: never[]) => T): void {
     try {
       return ok(await fn(...(args as never[])))
     } catch (error) {
+      return fail(error)
+    }
+  })
+}
+
+/**
+ * SkillsBot 专用包装：与 handle 同形，但额外把 BotApiError.code 透给渲染层，
+ * 让 UI 能区分「技能不存在 / 网络失败 / 平台业务错误 / 命中反爬陷阱」。
+ */
+function handleBot<T>(channel: string, fn: (...args: never[]) => T): void {
+  ipcMain.handle(channel, async (_event, ...args) => {
+    try {
+      return ok(await fn(...(args as never[])))
+    } catch (error) {
+      if (error instanceof BotApiError) {
+        return { ok: false, error: error.message, code: error.code }
+      }
       return fail(error)
     }
   })
@@ -391,6 +418,63 @@ export function registerIpc(): void {
 
   handle('app:getVersion', () => app.getVersion())
 
+  // ---------- SkillsBot 平台（skillsbot.cn，全程免登录） ----------
+  // 站点分类/搜索/热门/最新/详情均免登录可读；zip 下载需登录 token，故本模块不做下载。
+
+  /** 首屏一次性拿齐：分类树 + 热门 + 最新 */
+  handleBot('bot:bootstrap', async (type?: 1 | 2) => {
+    const config = loadConfig()
+    const t = type === 2 ? 2 : 1
+    const [categories, hot, newest] = await Promise.all([
+      fetchBotCategories(config, t),
+      fetchBotHot(config, t),
+      fetchBotNew(config, t)
+    ])
+    return { categories, hot, newest }
+  })
+
+  handleBot('bot:categories', (type?: 1 | 2) =>
+    fetchBotCategories(loadConfig(), type === 2 ? 2 : 1)
+  )
+
+  handleBot('bot:listByCategory', (opts: { categoryId: number | string; page?: number; type?: 1 | 2 }) => {
+    if (!opts || opts.categoryId === undefined || opts.categoryId === null) {
+      throw new BotApiError('api', '缺少分类 ID')
+    }
+    return listBotSkillsByCategory(loadConfig(), {
+      categoryId: opts.categoryId,
+      page: opts.page ?? 1,
+      type: opts.type === 2 ? 2 : 1
+    })
+  })
+
+  handleBot('bot:search', (opts: { keyword: string; page?: number; type?: 1 | 2 }) => {
+    const keyword = String(opts?.keyword ?? '').trim()
+    if (!keyword) throw new BotApiError('api', '搜索关键词不能为空')
+    return searchBotSkills(loadConfig(), {
+      keyword,
+      page: opts?.page ?? 1,
+      type: opts?.type === 2 ? 2 : 1
+    })
+  })
+
+  handleBot('bot:hot', (type?: 1 | 2) => fetchBotHot(loadConfig(), type === 2 ? 2 : 1))
+
+  handleBot('bot:new', (type?: 1 | 2) => fetchBotNew(loadConfig(), type === 2 ? 2 : 1))
+
+  /** 技能详情：含完整 SKILL.md 正文 + 完整性预判 + 缺失文件清单 */
+  handleBot('bot:detail', (id: string | number) => fetchBotSkillDetail(loadConfig(), id))
+
+  /**
+   * 免登录安装：把详情接口的完整 SKILL.md 落盘进共享库。
+   * 注意 id 全程按字符串透传（19 位雪花 ID 经 Number 转换会丢精度导致 404）。
+   */
+  handleBot('bot:install', (id: string | number, opts?: BotInstallOptions) =>
+    installBotSkillNoAuth(loadConfig(), id, {
+      replace: opts?.replace ?? loadConfig().skillsbot?.replaceByDefault ?? true
+    })
+  )
+
   // ---------- P7 设置 / 主题 / 导入导出 ----------
 
   /** 通用配置更新（ui / net / backup / marketplaces / sharedRoot 等浅合并字段）；更新后同步 nativeTheme */
@@ -401,6 +485,7 @@ export function registerIpc(): void {
     if (patch.backup !== undefined) config.backup = { ...config.backup, ...patch.backup }
     if (patch.marketplaces !== undefined) config.marketplaces = patch.marketplaces
     if (patch.search !== undefined) config.search = { ...config.search, ...patch.search }
+    if (patch.skillsbot !== undefined) config.skillsbot = { ...config.skillsbot, ...patch.skillsbot }
     if (patch.sharedRoot !== undefined) {
       if (!patch.sharedRoot.trim()) throw new Error('共享库路径不能为空')
       config.sharedRoot = patch.sharedRoot.trim()

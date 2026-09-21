@@ -12,19 +12,21 @@ import type {
 import { AgentCard } from './components/AgentCard'
 import { SkillsPanel } from './components/SkillsPanel'
 import { SkillHubPanel } from './components/SkillHubPanel'
+import { SkillsBotPanel } from './components/SkillsBotPanel'
 import { UpdatesPanel } from './components/UpdatesPanel'
 import { SettingsPanel } from './components/SettingsPanel'
 import { CreateConfirm, MergeConfirm, ResultModal, ConfirmDialog, Modal } from './components/Modal'
 import { TaskLogButton } from './components/TaskLogButton'
 import { useTaskLog } from './store/taskLog'
 
-type Tab = 'connect' | 'detect' | 'skills' | 'hub' | 'updates'
+type Tab = 'connect' | 'detect' | 'skills' | 'hub' | 'bot' | 'updates'
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'connect', label: '联接' },
   { key: 'detect', label: '探测' },
   { key: 'skills', label: '技能库' },
   { key: 'hub', label: 'SkillHub' },
+  { key: 'bot', label: 'SkillsBot' },
   { key: 'updates', label: '更新' }
 ]
 
@@ -384,6 +386,7 @@ export default function App() {
 
         {tab === 'skills' && <SkillsPanel refreshTick={refreshTick} config={config} />}
         {tab === 'hub' && <SkillHubPanel refreshTick={refreshTick} config={config} />}
+        {tab === 'bot' && <SkillsBotPanel refreshTick={refreshTick} config={config} />}
         {tab === 'updates' && <UpdatesPanel refreshTick={refreshTick} />}
       </main>
 
