@@ -59,7 +59,7 @@ export const useTaskLog = create<TaskLogState>((set) => ({
     const id = nextId()
     set((s) => ({
       tasks: [
-        { id, title, scope, status: 'running', startedAt: Date.now(), logs: [] },
+        { id, title, scope, status: 'running' as const, startedAt: Date.now(), logs: [] },
         ...s.tasks
       ].slice(0, MAX_ENTRIES)
     }))

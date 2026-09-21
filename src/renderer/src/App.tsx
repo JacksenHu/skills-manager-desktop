@@ -15,6 +15,8 @@ import { SkillHubPanel } from './components/SkillHubPanel'
 import { UpdatesPanel } from './components/UpdatesPanel'
 import { SettingsPanel } from './components/SettingsPanel'
 import { CreateConfirm, MergeConfirm, ResultModal, ConfirmDialog, Modal } from './components/Modal'
+import { TaskLogButton } from './components/TaskLogButton'
+import { useTaskLog } from './store/taskLog'
 
 type Tab = 'connect' | 'detect' | 'skills' | 'hub' | 'updates'
 
@@ -112,15 +114,19 @@ export default function App() {
 
   const activeCount = agents.filter((a) => a.state === 'active').length
 
-  /** 操作成功后统一收尾：关弹窗、刷新两个数据源 */
+  /** 任务日志：联接类操作的记录入口（安装/更新类在各自面板里登记） */
+  const logPush = useTaskLog((s) => s.push)
+
+  /** 操作成功后统一收尾：关弹窗、写任务日志、刷新两个数据源 */
   const afterOp = useCallback(
     (title: string, r: OpResult) => {
       setPending(null)
       setResult({ title, logs: r.logs })
+      logPush(title, r.logs, '联接')
       void refresh()
       setRefreshTick((t) => t + 1)
     },
-    [refresh]
+    [refresh, logPush]
   )
 
   /** 接入入口：先取预案，再弹确认 */
@@ -160,6 +166,12 @@ export default function App() {
   const confirmPending = useCallback(async () => {
     if (!pending) return
     setBusy(true)
+    const opTitle =
+      pending.kind === 'create'
+        ? `接入：${pending.plan.key}`
+        : pending.kind === 'remove'
+          ? `拆除：${pending.key}`
+          : `归并：${pending.plan.name}`
     try {
       if (pending.kind === 'create') {
         const r = await window.api.junction.create(pending.plan.key, pending.plan.path)
@@ -183,12 +195,14 @@ export default function App() {
         afterOp(`归并结果：${pending.plan.name}`, r.data)
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(msg)
+      logPush(`${opTitle}（失败）`, [msg], '联接')
       setPending(null)
     } finally {
       setBusy(false)
     }
-  }, [pending, afterOp])
+  }, [pending, afterOp, logPush])
 
   /** 探测卡片 inline 编辑保存：改名 = upsert 新键 + 删旧键；未配置预设保存即创建配置 */
   const saveEditAgent = useCallback(
@@ -232,15 +246,18 @@ export default function App() {
         }
         if (!r.ok) throw new Error(r.error ?? '恢复失败')
         setResult({ title: '恢复备份结果', logs: r.data?.logs ?? [] })
+        logPush('恢复接入备份', r.data?.logs ?? [], '联接')
         await refresh()
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
+        const msg = e instanceof Error ? e.message : String(e)
+        setError(msg)
+        logPush('恢复接入备份（失败）', [msg], '联接')
       } finally {
         setBusy(false)
         setPendingRestore(null)
       }
     },
-    [refresh]
+    [refresh, logPush]
   )
 
   return (
@@ -270,6 +287,7 @@ export default function App() {
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
+          <TaskLogButton />
           <button
             onClick={() => void refresh()}
             disabled={loading}

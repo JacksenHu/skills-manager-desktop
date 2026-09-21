@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowUpCircle, CheckCircle2, FileText, HelpCircle, RefreshCw, Search, ShieldQuestion } from 'lucide-react'
 import type { CheckUpdatesResult, IpcResult, OpResult, RepoUpdateInfo, ToolReleaseInfo, ToolUpdateInfo } from '@shared/types'
 import { Modal, ResultModal } from './Modal'
+import { useTaskLog } from '../store/taskLog'
 
 const REPO_STATE_META: Record<
   RepoUpdateInfo['state'],
@@ -41,17 +42,30 @@ export function UpdatesPanel({ refreshTick }: { refreshTick: number }) {
   const [releases, setReleases] = useState<ToolReleaseInfo[]>([])
   const [changelogOpen, setChangelogOpen] = useState(false)
 
+  /** 正在下载的工具更新任务 id（完成/失败时收尾用） */
+  const dlTaskRef = useRef<string | null>(null)
+
   useEffect(() => {
     const offProgress = window.api.on('update-progress', (p) => {
       setDlProgress((p as { percent: number }).percent)
     })
     const offDone = window.api.on('update-downloaded', (d) => {
-      setDownloadedVersion((d as { version: string }).version)
+      const v = (d as { version: string }).version
+      setDownloadedVersion(v)
       setDlProgress(null)
+      if (dlTaskRef.current) {
+        useTaskLog.getState().finish(dlTaskRef.current, [`已下载 v${v}`])
+        dlTaskRef.current = null
+      }
     })
     const offError = window.api.on('update-error', (e) => {
-      setError((e as { message: string }).message)
+      const msg = (e as { message: string }).message
+      setError(msg)
       setDlProgress(null)
+      if (dlTaskRef.current) {
+        useTaskLog.getState().fail(dlTaskRef.current, msg)
+        dlTaskRef.current = null
+      }
     })
     return () => {
       offProgress()
@@ -89,13 +103,18 @@ export function UpdatesPanel({ refreshTick }: { refreshTick: number }) {
 
   const upgrade = useCallback(async (repos: string[]) => {
     setUpgrading(true)
+    const { start, finish, fail } = useTaskLog.getState()
+    const taskId = start(`升级技能（${repos.length} 个仓库）`, '更新')
     try {
       const r = (await window.api.updates.updateSkills(repos)) as IpcResult<OpResult>
       if (!r.ok) throw new Error(r.error)
       setOpResult({ title: `升级结果（${repos.length} 个仓库）`, logs: r.data.logs })
+      finish(taskId, r.data.logs)
       void run()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(msg)
+      fail(taskId, msg)
     } finally {
       setUpgrading(false)
     }
@@ -179,12 +198,22 @@ export function UpdatesPanel({ refreshTick }: { refreshTick: number }) {
             {tool.state === 'has-update' && !downloadedVersion && dlProgress === null && (
               <button
                 onClick={async () => {
+                  const { start } = useTaskLog.getState()
+                  dlTaskRef.current = start(
+                    `下载新版本${tool.remoteVersion ? ` v${tool.remoteVersion}` : ''}`,
+                    '更新'
+                  )
                   try {
                     const r = await window.api.updates.downloadUpdate()
                     if (!r.ok) throw new Error(r.error)
                     if (!r.data.started && r.data.version) setError(null)
                   } catch (e) {
-                    setError(e instanceof Error ? e.message : String(e))
+                    const msg = e instanceof Error ? e.message : String(e)
+                    setError(msg)
+                    if (dlTaskRef.current) {
+                      useTaskLog.getState().fail(dlTaskRef.current, msg)
+                      dlTaskRef.current = null
+                    }
                   }
                 }}
                 className="ml-auto flex items-center gap-1.5 rounded-lg bg-sky-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-sky-600"

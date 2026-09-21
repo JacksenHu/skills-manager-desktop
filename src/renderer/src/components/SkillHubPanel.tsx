@@ -12,6 +12,7 @@ import type {
   OpResult
 } from '@shared/types'
 import { Modal, ResultModal } from './Modal'
+import { useTaskLog } from '../store/taskLog'
 
 const SORT_TABS = [
   { key: 'score', label: '全部' },
@@ -81,12 +82,18 @@ function PackagesView({ onError }: { onError: (msg: string) => void }) {
   const install = useCallback(
     async (marketName: string, plugin: MarketPlugin) => {
       setInstalling(plugin.name)
+      const { start, finish, fail } = useTaskLog.getState()
+      const title = `安装套件：${plugin.name}`
+      const taskId = start(title, '市场')
       try {
         const r = (await window.api.market.install(marketName, plugin.name)) as IpcResult<OpResult>
         if (!r.ok) throw new Error(r.error)
-        setResult({ title: `安装套件：${plugin.name}`, logs: r.data.logs })
+        setResult({ title, logs: r.data.logs })
+        finish(taskId, r.data.logs)
       } catch (e) {
-        onError(e instanceof Error ? e.message : String(e))
+        const msg = e instanceof Error ? e.message : String(e)
+        onError(msg)
+        fail(taskId, msg)
       } finally {
         setInstalling(null)
       }
@@ -444,13 +451,18 @@ export function SkillHubPanel({
   const install = useCallback(
     async (slug: string, namespace: string, title: string) => {
       setInstallingSlug(slug)
+      const { start, finish, fail } = useTaskLog.getState()
+      const taskId = start(title, '市场')
       try {
         const r = (await window.api.hub.install(slug, namespace, true)) as IpcResult<OpResult>
         if (!r.ok) throw new Error(r.error)
         setOpResult({ title, logs: r.data.logs })
+        finish(taskId, r.data.logs)
         void refreshInstalled()
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
+        const msg = e instanceof Error ? e.message : String(e)
+        setError(msg)
+        fail(taskId, msg)
       } finally {
         setInstallingSlug(null)
       }

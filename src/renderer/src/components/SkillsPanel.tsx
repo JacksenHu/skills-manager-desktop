@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowRightLeft, Boxes, FolderOpen, Info, Languages, Link2, Plus, RefreshCw, Route, Search, Sparkles, Tag, Tags, Trash2, X } from 'lucide-react'
 import type { AppConfig, IpcResult, OpResult, RepoSearchResult, RouterTarget, SkillInfo } from '@shared/types'
 import { ConfirmDialog, Modal, ResultModal, RouterConfirm } from './Modal'
+import { useTaskLog } from '../store/taskLog'
 
 const CATEGORY_ORDER = [
   '开发与工程',
@@ -175,22 +176,30 @@ export function SkillsPanel({
     void run()
   }, [run, refreshTick])
 
-  /** 统一执行 + 结果弹窗（成功后自动刷新列表） */
+  /** 统一执行 + 结果弹窗（成功后自动刷新列表）；同时登记到全局任务日志 */
+  const logStart = useTaskLog((s) => s.start)
+  const logFinish = useTaskLog((s) => s.finish)
+  const logFail = useTaskLog((s) => s.fail)
+
   const execute = useCallback(
     async (title: string, action: () => Promise<IpcResult<OpResult>>, done?: () => void) => {
+      const taskId = logStart(title, '技能库')
       try {
         const r = await action()
         if (!r.ok) throw new Error(r.error)
         setResult({ title, logs: r.data.logs })
+        logFinish(taskId, r.data.logs)
         void run()
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
+        const msg = e instanceof Error ? e.message : String(e)
+        setError(msg)
+        logFail(taskId, msg)
       } finally {
         setBusy(null)
         done?.()
       }
     },
-    [run]
+    [run, logStart, logFinish, logFail]
   )
 
   const counts = useMemo(() => {
