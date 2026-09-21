@@ -71,6 +71,9 @@ PowerShell 源码路径可用 `SKILLS_PS_ROOT` 环境变量覆盖。
 - [x] 自动更新：electron-updater（GitHub Releases 通道，用户触发下载/安装，更新页有进度条）
 - [x] 自动发布：push tag `v*` 触发 GitHub Actions（`.github/workflows/release.yml`），构建 → 校验 tag 与 package.json 版本一致 → 发布 Release（含 latest.yml 供自动更新）
 - [x] SkillHub 市场：对接 skillhub.cn 平台（导航 SkillHub 页：排序标签 / 分类筛选 / 关键词搜索 / 卡片详情弹窗 / 一键安装含 sha256 校验，GitHub 上游技能自动建更新基准）
+- [x] SkillsBot：对接 skillsbot.cn（免登录浏览与安装：分类双体系 / 搜索 / 热门 / 最新 / 详情弹窗 / 一键安装 SKILL.md；离线冒烟 `verify:p12` + 真机联网验证 `verify:p12:live`）
+- [x] 任务日志中心：顶栏「任务日志」入口汇总安装 / 移除 / 翻译 / 生成路由 / 建拆联接 / 更新升级等操作，进行中带红色数字徽标
+- [x] 生成路由重做：路由技能写到各 Agent 的真实技能加载目录（此前写在共享库根 = 会话里调不到），清单只收录该根实际可见的技能
 
 ## 发布流程
 
