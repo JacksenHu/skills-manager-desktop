@@ -343,4 +343,4 @@ export interface RouterTarget {
 }
 
 /** 所有 IPC 的统一返回结构 */
-export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string }
+export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string; code?: string }

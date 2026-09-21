@@ -76,6 +76,8 @@ const api = {
   app: {
     version: () => ipcRenderer.invoke('app:getVersion'),
     openPath: (path: string) => ipcRenderer.invoke('shell:openPath', path),
+    /** 用系统浏览器打开外链（host 侧只放行 http/https） */
+    openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
     pickDirectory: (title?: string) => ipcRenderer.invoke('dialog:pickDirectory', title)
   },
   backup: {

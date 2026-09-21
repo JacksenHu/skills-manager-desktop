@@ -464,6 +464,14 @@ export function registerIpc(): void {
     return result === '' ? { opened: true } : { opened: false, message: result }
   })
 
+  /** 用系统默认浏览器打开外链（仅允许 http/https，避免被塞 file:// 或自定义协议） */
+  handle('shell:openExternal', async (url: string) => {
+    const target = String(url ?? '').trim()
+    if (!/^https?:\/\//i.test(target)) throw new Error(`只允许打开 http/https 链接：${target}`)
+    await shell.openExternal(target)
+    return { opened: true }
+  })
+
   // 目录选择对话框（备份路径 / 新建 Agent 配置等）
   handle('dialog:pickDirectory', async (title?: string) => {
     const result = await dialog.showOpenDialog({

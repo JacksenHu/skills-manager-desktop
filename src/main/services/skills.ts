@@ -360,7 +360,7 @@ const GH_OPTS = (config: AppConfig) => ({
 })
 
 /** 递归收集含 SKILL.md 的目录（含 root 自身，PS -Recurse 同口径；不跟随联接） */
-function findSkillDirs(root: string): string[] {
+export function findSkillDirs(root: string): string[] {
   const out: string[] = []
   if (existsSync(join(root, 'SKILL.md'))) out.push(root)
   const walk = (dir: string): void => {

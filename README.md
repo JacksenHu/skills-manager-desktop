@@ -74,14 +74,28 @@ PowerShell 源码路径可用 `SKILLS_PS_ROOT` 环境变量覆盖。
 
 ## 发布流程
 
+**每个版本都必须有更新说明**，唯一来源是 `CHANGELOG.md`：CI 会校验当前版本段落存在且非空（缺失直接失败），并把该段落作为 GitHub Release 正文；应用内「更新」页的「更新日志」弹窗读的也是它。
+
 ```bash
-# 1. 改 package.json 的 version（如 0.1.0 → 0.2.0）
-# 2. 提交并打 tag 推送，CI 自动出包发布：
-git add . && git commit -m "feat: xxx" && git tag v0.2.0 && git push origin main --tags
-# 3. GitHub Actions 跑完后，Release 页出现安装包 + latest.yml
-# 4. 已安装的旧版本在「更新」页检测到新版本 → 下载 → 重启安装
+# 1. 写更新说明：把 CHANGELOG.md 的「## [未发布]」改成  ## [新版本] - YYYY-MM-DD
+#    并在上方新开一个空的「## [未发布]」（分类用 新增 / 优化 / 修复 / 其他）
+# 2. 改 package.json 的 version，与 CHANGELOG 的版本号一致
+# 3. 本地过一遍回归（第一步就是 CHANGELOG 校验）：
+npm run verify:all
+npm run notes          # 预览这次会发到 Release 的说明
+# 4. 提交并打 tag 推送，CI 自动出包发布：
+git add . && git commit -m "chore: release v0.3.1" && git tag v0.3.1 && git push origin main --tags
+# 5. GitHub Actions：校验 CHANGELOG → 构建 → 发布（Release 正文 = 该版本段落，含安装包与 latest.yml）
+# 6. 已安装的旧版本在「更新」页检测到新版本 → 下载 → 重启安装
 ```
-- [ ] P8 打包分发
+
+单独校验/预览：
+
+```bash
+npm run check:changelog         # 校验 package.json 版本有没有更新说明
+npm run check:changelog 0.4.0   # 校验指定版本
+npm run notes -- --version 0.4.0
+```
 
 ### 已知边界（P4 遗留）
 

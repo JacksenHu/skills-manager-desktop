@@ -25,6 +25,10 @@ jobs:
 
       - run: npm ci
 
+      # 每个版本都必须有更新说明：CHANGELOG.md 缺当前版本段落（或段落为空）就在这里失败
+      - name: Verify changelog (每版必须有更新说明)
+        run: npm run check:changelog
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -47,15 +51,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Recreate clean release (auto notes)
+      - name: Recreate clean release (notes from CHANGELOG)
         shell: bash
         run: |
           TAG="v$(node -p "require('./package.json').version")"
+          # 更新说明的唯一来源：CHANGELOG.md 里对应版本的段落（缺失/为空会在此步失败）
+          node scripts/release-notes.mjs --out NOTES.md
           # 删掉该 tag 名下的全部旧 release（含孤儿 draft），保证单份干净
           for RID in $(gh api "repos/$GH_REPO/releases" --jq ".[] | select(.tag_name==\"$TAG\") | .id"); do
             gh api -X DELETE "repos/$GH_REPO/releases/$RID" >/dev/null 2>&1 || true
           done
-          gh release create "$TAG" --title "$TAG" --generate-notes --latest
+          gh release create "$TAG" --title "$TAG" --notes-file NOTES.md --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
